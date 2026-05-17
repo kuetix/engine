@@ -1,0 +1,58 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <style>
+        .rotating {
+        animation: rotate 5s linear infinite;
+        transform-origin: 100px 100px;
+        }
+
+        @keyframes rotate {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+        }
+    </style>
+
+    <g class="rotating">
+        <!-- Outer Nodes -->
+        <circle cx="100" cy="55" r="8" fill="#36A8E0"/>
+        <circle cx="145" cy="100" r="8" fill="#36A8E0"/>
+        <circle cx="100" cy="145" r="8" fill="#36A8E0"/>
+        <circle cx="55" cy="100" r="8" fill="#36A8E0"/>
+
+        <!-- Connecting Lines -->
+        <line x1="100" y1="100" x2="100" y2="55" stroke="#36A8E0" stroke-width="1"/>
+        <line x1="100" y1="100" x2="145" y2="100" stroke="#36A8E0" stroke-width="1"/>
+        <line x1="100" y1="100" x2="100" y2="145" stroke="#36A8E0" stroke-width="1"/>
+        <line x1="100" y1="100" x2="55" y2="100" stroke="#36A8E0" stroke-width="1"/>
+
+    </g>
+    <!-- Center Gear at exact center -->
+    <g transform="translate(75, 75)">
+        <path d="
+        M25 5
+        L30 7
+        L35 7
+        L37 12
+        L42 15
+        L42 20
+        L45 25
+        L42 30
+        L42 35
+        L37 38
+        L35 43
+        L30 43
+        L25 45
+        L20 43
+        L15 43
+        L13 38
+        L8 35
+        L8 30
+        L5 25
+        L8 20
+        L8 15
+        L13 12
+        L15 7
+        L20 7
+        Z" fill="#36A8E0"/>
+        <circle cx="25" cy="25" r="10" fill="#36A8E0"/>
+    </g>
+</svg>

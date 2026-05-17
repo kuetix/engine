@@ -1,0 +1,15 @@
+Package: kue
+Version: 0.1.0
+Section: devel
+Priority: optional
+Architecture: amd64
+Maintainer: Kuetix Team <support@kuetix.com>
+
+Description: CLI tool for Kuetix Engine workflow management
+ Kue is a command-line interface for the Kuetix Engine that provides
+ workflow management capabilities including:
+  - Initialize new workflow projects (kue init)
+  - Run workflows locally (kue run)
+  - Validate S/WSL/JSON workflow files (kue validate)
+  - Run workflow tests (kue test)
+Homepage: https://github.com/kuetix/engine

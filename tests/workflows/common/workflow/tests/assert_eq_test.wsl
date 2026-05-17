@@ -1,0 +1,12 @@
+module tests.example
+
+workflow wsl_example_assert_int_test {
+  start: Done
+
+  state Done {
+    action response/ResponseLastSuccess()
+    end ok
+  }
+}
+
+
