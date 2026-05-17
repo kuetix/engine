@@ -1,4 +1,4 @@
-package engine_dev
+package engine
 
 import (
 	"github.com/kuetix/engine/engine/domain"
