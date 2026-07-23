@@ -64,6 +64,21 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 			}
 			st.ContinueOnFail = cs.ContinueOnFail
 			st.SkipTo = cs.SkipTo
+			if cs.Parallel {
+				st.Parallel = true
+				count, err := parallelCount(cs.ParallelAttrs)
+				if err != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': %v", st.Name, wf.Name, err)}
+				}
+				st.ParallelCount = count
+			}
+			if cs.Wait {
+				st.Wait = true
+				if cs.JoinTarget == nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("wait state '%s' in workflow '%s' must declare 'join <ParallelState>'", st.Name, wf.Name)}
+				}
+				st.JoinTarget = cs.JoinTarget.Lexeme
+			}
 			if cs.Action != nil {
 				st.Action = toAction(cs.Action)
 			}
@@ -134,9 +149,61 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 				}
 			}
 		}
+		// parallel/wait validation: every parallel state must have an action and
+		// exactly one wait state joining it; every wait must join a parallel state.
+		joinedBy := map[string]string{} // parallel state -> wait state
+		for _, st := range wf.States {
+			if st.Wait {
+				target, ok := wf.States[st.JoinTarget]
+				if !ok {
+					return nil, &SemanticError{Msg: fmt.Sprintf("wait state '%s' joins unknown state '%s' in workflow '%s'", st.Name, st.JoinTarget, wf.Name)}
+				}
+				if !target.Parallel {
+					return nil, &SemanticError{Msg: fmt.Sprintf("wait state '%s' joins '%s' which is not a parallel state in workflow '%s'", st.Name, st.JoinTarget, wf.Name)}
+				}
+				if prev, dup := joinedBy[st.JoinTarget]; dup {
+					return nil, &SemanticError{Msg: fmt.Sprintf("parallel state '%s' is joined by both '%s' and '%s' in workflow '%s'", st.JoinTarget, prev, st.Name, wf.Name)}
+				}
+				joinedBy[st.JoinTarget] = st.Name
+			}
+		}
+		for _, st := range wf.States {
+			if st.Parallel {
+				if st.Action == nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("parallel state '%s' in workflow '%s' must have an action", st.Name, wf.Name)}
+				}
+				if _, ok := joinedBy[st.Name]; !ok {
+					return nil, &SemanticError{Msg: fmt.Sprintf("parallel state '%s' in workflow '%s' has no matching 'wait' state (branches would leak)", st.Name, wf.Name)}
+				}
+			}
+		}
 		m.Workflows = append(m.Workflows, wf)
 	}
 	return m, nil
+}
+
+// parallelCount extracts the required integer 'count' attribute from a
+// parallel state's (or SWSL fork action's) attribute list.
+func parallelCount(attrs []CSTConstEntry) (int, error) {
+	for _, e := range attrs {
+		if e.Key.Lexeme != "count" {
+			continue
+		}
+		val, err := convertConstValue(e.Val)
+		if err != nil {
+			return 0, fmt.Errorf("invalid 'count' value: %v", err)
+		}
+		switch v := val.(type) {
+		case int64:
+			if v < 1 {
+				return 0, fmt.Errorf("'count' must be >= 1, got %d", v)
+			}
+			return int(v), nil
+		default:
+			return 0, fmt.Errorf("'count' must be an integer, got %T", val)
+		}
+	}
+	return 0, fmt.Errorf("parallel state requires a 'count' attribute, e.g. parallel[count: 4]")
 }
 
 func toAction(ca *CSTAction) *Action {

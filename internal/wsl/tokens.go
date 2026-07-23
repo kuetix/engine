@@ -29,6 +29,9 @@ const (
 	TokConst
 	TokExtends
 	TokDef
+	TokParallel
+	TokWait
+	TokJoin
 
 	// Condition keywords
 	TokSuccess
@@ -156,6 +159,12 @@ func (k TokenKind) String() string {
 		return "extends"
 	case TokDef:
 		return "def"
+	case TokParallel:
+		return "parallel"
+	case TokWait:
+		return "wait"
+	case TokJoin:
+		return "join"
 	case TokGt:
 		return ">"
 	case TokLt:

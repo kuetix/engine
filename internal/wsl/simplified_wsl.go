@@ -1,6 +1,7 @@
 package wsl
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -46,12 +47,16 @@ type SimplifiedCSTModule struct {
 
 // SimplifiedCSTAction represents an action with its flow connections
 type SimplifiedCSTAction struct {
-	Span               Span
-	DefTok             *Token // optional 'def' keyword
-	QNameTok           Token  // module.fn or qname
-	LParen             Token
-	Args               []CSTExpr
-	RParen             Token
+	Span     Span
+	DefTok   *Token // optional 'def' keyword
+	QNameTok Token  // module.fn or qname
+	LParen   Token
+	Args     []CSTExpr
+	RParen   Token
+	// Optional [count: N] fork attributes, e.g. action()[count: 6]. When
+	// present, this action call lowers to a parallel-fork state joined by a
+	// synthetic wait state immediately after it (see buildParallelStatePair).
+	ParallelAttrs      []CSTConstEntry
 	AsTok              *Token
 	AliasTok           *Token
 	ErrorBindingRef    *Token               // optional error handler reference (via <-)
@@ -259,12 +264,23 @@ func (p *parser) parseSimplifiedActionBody(qnameTok Token) (*SimplifiedCSTAction
 		return nil, err
 	}
 
+	// Optional [count: N] fork attributes, e.g. commands.Register()[count: 6].
+	// This is SWSL's sugar for a parallel[count: N] state: the action forks
+	// into N concurrent branches, immediately joined before the chain
+	// continues (SWSL has no syntax for named states between fork and join,
+	// so unlike full WSL the join is always implicit and immediate here).
+	parallelAttrs, err := p.parseOptionalBracketAttrs()
+	if err != nil {
+		return nil, err
+	}
+
 	action := &SimplifiedCSTAction{
-		Span:     Span{Start: qnameTok.Pos},
-		QNameTok: qnameTok,
-		LParen:   lparen,
-		Args:     args,
-		RParen:   rparen,
+		Span:          Span{Start: qnameTok.Pos},
+		QNameTok:      qnameTok,
+		LParen:        lparen,
+		Args:          args,
+		RParen:        rparen,
+		ParallelAttrs: parallelAttrs,
 	}
 
 	// Check for 'as' alias
@@ -430,6 +446,65 @@ func buildSimplifiedAST(cst *SimplifiedCSTModule) (*Module, error) {
 	return mod, nil
 }
 
+// buildParallelStatePair lowers an SWSL action carrying [count: N] fork
+// attributes into a parallel-fork state immediately followed by a synthetic
+// wait (join) state — SWSL's sugar for the full-WSL pair:
+//
+//	parallel[count: N] <baseName> { action ...; on success -> <baseName>_join }
+//	wait <baseName>_join { join <baseName> }
+//
+// Unlike full WSL (where fork and wait can be separated by other states so
+// work overlaps with the branches), SWSL's single linear chain has no syntax
+// for states in between, so the join is always immediate: the chain's next
+// action/terminal only runs after every branch completes. Returns the fork
+// state's name (the entry point other transitions should target) and the
+// wait state's name (the state that should receive the chain's continuation
+// — success/error transitions or a terminal end).
+func buildParallelStatePair(action *SimplifiedCSTAction, baseName string, wf *Workflow) (forkName, waitName string, err error) {
+	count, err := parallelCount(action.ParallelAttrs)
+	if err != nil {
+		return "", "", fmt.Errorf("state '%s': %w", baseName, err)
+	}
+
+	forkName = baseName
+	waitName = baseName + "_join"
+	if _, exists := wf.States[forkName]; exists {
+		return "", "", fmt.Errorf("duplicate state '%s'", forkName)
+	}
+	if _, exists := wf.States[waitName]; exists {
+		return "", "", fmt.Errorf("duplicate state '%s'", waitName)
+	}
+
+	act := &Action{Name: action.QNameTok.Lexeme}
+	if idx := findLastDotOrSlash(action.QNameTok.Lexeme); idx != -1 {
+		act.Module = action.QNameTok.Lexeme[:idx]
+		act.Name = action.QNameTok.Lexeme[idx+1:]
+	}
+	for _, arg := range action.Args {
+		act.Args = append(act.Args, Expr{Raw: arg.Raw})
+	}
+	if action.AliasTok != nil {
+		act.As = action.AliasTok.Lexeme
+	}
+
+	wf.States[forkName] = &State{
+		Name:          forkName,
+		Action:        act,
+		Parallel:      true,
+		ParallelCount: count,
+		Transitions: []Transition{
+			{Name: "fork_join", Condition: Condition{Kind: CondSuccess}, Target: waitName},
+		},
+	}
+	wf.States[waitName] = &State{
+		Name:       waitName,
+		Wait:       true,
+		JoinTarget: forkName,
+	}
+
+	return forkName, waitName, nil
+}
+
 // buildWorkflowFromActions converts simplified actions into a workflow
 func buildWorkflowFromActions(actions []SimplifiedCSTAction, cst *SimplifiedCSTModule) (*Workflow, error) {
 	// Determine workflow name
@@ -478,11 +553,34 @@ func buildWorkflowFromActions(actions []SimplifiedCSTAction, cst *SimplifiedCSTM
 		return wf, nil
 	}
 
-	// First pass: create all states and assign names for regular actions only
+	// First pass: create all states and assign names for regular actions only.
+	// entryNames[i] is the state a predecessor should transition to (the fork
+	// state for a parallel action, otherwise the action's own state).
+	// wireNames[i] is the state that owns this action's outgoing transitions
+	// (the synthetic join state for a parallel action, since success/error
+	// there means "all branches finished"; otherwise the action's own state).
 	stateCounter := 0
-	stateNames := make(map[int]string) // Map action index to state name
+	entryNames := make(map[int]string)
+	wireNames := make(map[int]string)
 
 	for i, action := range regularActions {
+		if len(action.ParallelAttrs) > 0 {
+			baseName := action.QNameTok.Lexeme
+			if action.AliasTok != nil {
+				baseName = action.AliasTok.Lexeme
+			} else {
+				baseName = generateStateName(baseName, stateCounter)
+				stateCounter++
+			}
+			forkName, waitName, err := buildParallelStatePair(&action, baseName, wf)
+			if err != nil {
+				return nil, err
+			}
+			entryNames[i] = forkName
+			wireNames[i] = waitName
+			continue
+		}
+
 		var stateName string
 		if action.AliasTok != nil {
 			stateName = action.AliasTok.Lexeme
@@ -491,7 +589,8 @@ func buildWorkflowFromActions(actions []SimplifiedCSTAction, cst *SimplifiedCSTM
 			stateName = generateStateName(action.QNameTok.Lexeme, stateCounter)
 			stateCounter++
 		}
-		stateNames[i] = stateName
+		entryNames[i] = stateName
+		wireNames[i] = stateName
 
 		// Create basic state
 		state := &State{
@@ -523,12 +622,12 @@ func buildWorkflowFromActions(actions []SimplifiedCSTAction, cst *SimplifiedCSTM
 	}
 
 	// Set start state
-	wf.Start = stateNames[0]
-	wf.States[stateNames[0]].Start = true
+	wf.Start = entryNames[0]
+	wf.States[entryNames[0]].Start = true
 
 	// Second pass: wire up transitions and flows
 	for i, action := range regularActions {
-		state := wf.States[stateNames[i]]
+		state := wf.States[wireNames[i]]
 		if err := wireStateTransitions(&action, state, wf, &stateCounter, definitions, "ok"); err != nil {
 			return nil, err
 		}
@@ -540,7 +639,41 @@ func buildWorkflowFromActions(actions []SimplifiedCSTAction, cst *SimplifiedCSTM
 // addActionFlowToWorkflow recursively adds an action and its flows to the workflow.
 // isErrorHandler controls whether a terminal (-> .) on this action ends with kind "fail"
 // (error path) or "ok" (success path).
+//
+// If action carries [count: N] fork attributes, it lowers to a parallel-fork
+// state plus a synthetic join state (see buildParallelStatePair); the
+// returned name is the fork state (what a predecessor should transition to),
+// and the action's own error/next flow is wired onto the join state instead,
+// so success/error only fires after every branch completes.
 func addActionFlowToWorkflow(action *SimplifiedCSTAction, wf *Workflow, stateCounter *int, definitions map[string]*SimplifiedCSTAction, isErrorHandler bool) (string, error) {
+	terminalKind := "ok"
+	if isErrorHandler {
+		terminalKind = "fail"
+	}
+
+	if len(action.ParallelAttrs) > 0 {
+		baseName := action.QNameTok.Lexeme
+		if action.AliasTok != nil {
+			baseName = action.AliasTok.Lexeme
+		} else {
+			baseName = generateStateName(baseName, *stateCounter)
+			*stateCounter++
+		}
+		// If this exact def action was already inlined elsewhere (reused via
+		// an alias reference), reuse its fork/join pair instead of rebuilding.
+		if _, exists := wf.States[baseName]; exists {
+			return baseName, nil
+		}
+		forkName, waitName, err := buildParallelStatePair(action, baseName, wf)
+		if err != nil {
+			return "", err
+		}
+		if err := wireStateTransitions(action, wf.States[waitName], wf, stateCounter, definitions, terminalKind); err != nil {
+			return "", err
+		}
+		return forkName, nil
+	}
+
 	// Determine state name
 	var stateName string
 	if action.AliasTok != nil {
@@ -581,12 +714,6 @@ func addActionFlowToWorkflow(action *SimplifiedCSTAction, wf *Workflow, stateCou
 	}
 
 	state.Action = act
-
-	// Determine terminal kind based on context
-	terminalKind := "ok"
-	if isErrorHandler {
-		terminalKind = "fail"
-	}
 
 	if err := wireStateTransitions(action, state, wf, stateCounter, definitions, terminalKind); err != nil {
 		return "", err

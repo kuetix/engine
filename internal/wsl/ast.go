@@ -43,6 +43,12 @@ type State struct {
 	IfExpr         *Expr // optional if condition expression
 	ContinueOnFail bool  // continue on fail flag
 	SkipTo         bool  // skip to flag
+	// Parallel fork: run the state's action ParallelCount times concurrently.
+	Parallel      bool
+	ParallelCount int
+	// Wait (join) state: block until all branches of JoinTarget finish.
+	Wait       bool
+	JoinTarget string
 }
 
 type Action struct {
@@ -107,6 +113,11 @@ type Node struct {
 	IfExpr         *Expr             // optional if condition expression
 	ContinueOnFail bool              // continue on fail flag
 	SkipTo         bool              // skip to flag
+	// Parallel fork/join
+	Parallel      bool
+	ParallelCount int
+	Wait          bool
+	JoinTarget    string
 }
 
 type Edge struct {

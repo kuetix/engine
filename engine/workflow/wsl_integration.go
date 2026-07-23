@@ -179,6 +179,12 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 		if n.SkipTo {
 			tr["skipTo"] = true
 		}
+		if n.Parallel {
+			tr["parallel_count"] = n.ParallelCount
+		}
+		if n.Wait {
+			tr["wait_join"] = n.JoinTarget
+		}
 		// inject action args as options for this transition
 		if n.Action != nil {
 			mergeActionArgsIntoTransition(tr, argsToOptions(n.Action.Args))
@@ -245,6 +251,12 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 		if n.SkipTo {
 			tr["skipTo"] = true
 		}
+		if n.Parallel {
+			tr["parallel_count"] = n.ParallelCount
+		}
+		if n.Wait {
+			tr["wait_join"] = n.JoinTarget
+		}
 		// inject action args as options for this transition
 		if n.Action != nil {
 			mergeActionArgsIntoTransition(tr, argsToOptions(n.Action.Args))
@@ -305,6 +317,8 @@ var reservedTransitionKeys = map[string]struct{}{
 	"if":               {},
 	"continue_on_fail": {},
 	"skipTo":           {},
+	"parallel_count":   {},
+	"wait_join":        {},
 	"response":         {},
 	"_call.paramNames": {},
 	"_call.args.map":   {},

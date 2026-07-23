@@ -24,6 +24,10 @@ func BuildGraph(wf Workflow) *Graph {
 		}
 		n.ContinueOnFail = st.ContinueOnFail
 		n.SkipTo = st.SkipTo
+		n.Parallel = st.Parallel
+		n.ParallelCount = st.ParallelCount
+		n.Wait = st.Wait
+		n.JoinTarget = st.JoinTarget
 		if st.End != nil {
 			n.Terminal = true
 			n.TerminalKind = st.End.Kind

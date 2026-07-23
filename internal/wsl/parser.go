@@ -394,7 +394,16 @@ func (p *parser) parseWorkflow() (*CSTWorkflow, error) {
 		if p.cur.Kind == TokEOF {
 			return nil, errf(p.cur.Pos, "unexpected EOF in workflow, here: ...%s...", p.lx.Peace(20))
 		}
-		st, err := p.parseState()
+		var st *CSTState
+		var err error
+		switch p.cur.Kind {
+		case TokParallel:
+			st, err = p.parseParallelState()
+		case TokWait:
+			st, err = p.parseWaitState()
+		default:
+			st, err = p.parseState()
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -411,6 +420,124 @@ func (p *parser) parseState() (*CSTState, error) {
 	if err != nil {
 		return nil, err
 	}
+	return p.parseStateAfterKeyword(stTok)
+}
+
+// parseParallelState parses a parallel state:
+//
+//	parallel[count: 6] Name { action ...; on success -> Next }
+//
+// The bracketed attribute list is optional in the grammar but 'count' is
+// required semantically (enforced in BuildAST). The state body is identical
+// to a regular state body.
+func (p *parser) parseParallelState() (*CSTState, error) {
+	pTok, err := p.expect(TokParallel)
+	if err != nil {
+		return nil, err
+	}
+	attrs, err := p.parseOptionalBracketAttrs()
+	if err != nil {
+		return nil, err
+	}
+	st, err := p.parseStateAfterKeyword(pTok)
+	if err != nil {
+		return nil, err
+	}
+	st.Parallel = true
+	st.ParallelAttrs = attrs
+	return st, nil
+}
+
+// parseOptionalBracketAttrs parses an optional [key: value, ...] attribute
+// list, e.g. the count in `parallel[count: 6]`. Shared between full WSL and
+// SimplifiedWSL so both surfaces accept identical attribute syntax.
+func (p *parser) parseOptionalBracketAttrs() ([]CSTConstEntry, error) {
+	var attrs []CSTConstEntry
+	if _, ok := p.accept(TokLBrack); !ok {
+		return nil, nil
+	}
+	for p.cur.Kind != TokRBrack {
+		if p.cur.Kind == TokEOF {
+			return nil, errf(p.cur.Pos, "unexpected EOF in bracket attributes, here: ...%s...", p.lx.Peace(20))
+		}
+		key, err := p.expect(TokIdent)
+		if err != nil {
+			return nil, err
+		}
+		colon, err := p.expect(TokColon)
+		if err != nil {
+			return nil, err
+		}
+		val, err := p.parseConstValue()
+		if err != nil {
+			return nil, err
+		}
+		attrs = append(attrs, CSTConstEntry{Key: key, Colon: colon, Val: val})
+		if _, ok := p.accept(TokComma); ok {
+			continue
+		}
+		if p.cur.Kind == TokRBrack {
+			break
+		}
+	}
+	if _, err := p.expect(TokRBrack); err != nil {
+		return nil, err
+	}
+	return attrs, nil
+}
+
+// parseWaitState parses a wait (join) state:
+//
+//	wait Name { join ParallelStateName; on success -> Next; on error -> Failed }
+//
+// A wait state has no action; its transitions fire after every branch of the
+// joined parallel state has finished.
+func (p *parser) parseWaitState() (*CSTState, error) {
+	wTok, err := p.expect(TokWait)
+	if err != nil {
+		return nil, err
+	}
+	nameTok, err := p.expect(TokIdent)
+	if err != nil {
+		return nil, err
+	}
+	lbr, err := p.expect(TokLBrace)
+	if err != nil {
+		return nil, err
+	}
+	st := &CSTState{Span: Span{Start: wTok.Pos}, NameTok: nameTok, LBrace: lbr, Wait: true}
+	if joinTok, ok := p.accept(TokJoin); ok {
+		st.JoinTok = &joinTok
+		target, err := p.expect(TokIdent)
+		if err != nil {
+			return nil, err
+		}
+		st.JoinTarget = &target
+	}
+	for p.cur.Kind == TokOn {
+		tr, err := p.parseTransition()
+		if err != nil {
+			return nil, err
+		}
+		st.Transitions = append(st.Transitions, *tr)
+	}
+	if p.cur.Kind == TokEnd {
+		end, err := p.parseEnd()
+		if err != nil {
+			return nil, err
+		}
+		st.End = end
+	}
+	rbr, err := p.expect(TokRBrace)
+	if err != nil {
+		return nil, err
+	}
+	st.RBrace = rbr
+	st.Span.End = rbr.Pos
+	return st, nil
+}
+
+func (p *parser) parseStateAfterKeyword(stTok Token) (*CSTState, error) {
 	nameTok, err := p.expect(TokIdent)
 	if err != nil {
 		return nil, err

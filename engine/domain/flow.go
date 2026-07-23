@@ -40,6 +40,8 @@ type FlowTransition struct {
 	Else           *string                `json:"else,omitempty"`
 	OnSuccessWhen  *string                `json:"on_success_when,omitempty"`
 	SkipTo         *bool                  `json:"skipTo,omitempty"`
+	ParallelCount  int                    `json:"parallel_count,omitempty" mapstructure:"parallel_count,omitempty"`
+	WaitJoin       string                 `json:"wait_join,omitempty" mapstructure:"wait_join,omitempty"`
 	From           []string               `json:"from,omitempty"`
 	To             string                 `json:"to"`
 	Error          string                 `json:"error,omitempty"`

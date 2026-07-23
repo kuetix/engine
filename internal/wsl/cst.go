@@ -67,10 +67,17 @@ type CSTState struct {
 	IfExpr         *CSTExpr // if condition expression
 	ContinueOnFail bool     // 'continue on fail' flag
 	SkipTo         bool     // 'skip to' flag
-	Action         *CSTAction
-	Transitions    []CSTTransition
-	End            *CSTEnd
-	RBrace         Token
+	// Parallel fork state: parallel[count: N] Name { ... }
+	Parallel      bool
+	ParallelAttrs []CSTConstEntry // attributes from the [ ... ] list (count, ...)
+	// Wait (join) state: wait Name { join Target ... }
+	Wait        bool
+	JoinTok     *Token
+	JoinTarget  *Token
+	Action      *CSTAction
+	Transitions []CSTTransition
+	End         *CSTEnd
+	RBrace      Token
 }
 
 type CSTAction struct {

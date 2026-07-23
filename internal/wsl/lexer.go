@@ -310,6 +310,12 @@ func keywordKind(s string) TokenKind {
 		return TokExtends
 	case "def":
 		return TokDef
+	case "parallel":
+		return TokParallel
+	case "wait":
+		return TokWait
+	case "join":
+		return TokJoin
 	default:
 		return TokIdent
 	}

@@ -155,6 +155,17 @@ func (baseWorker *workflowWorker) ProcessState(w EngineInterface, flow *domain.F
 		Engine:          w,
 	}
 
+	// Parallel fork/join states are handled by the engine itself, not by a
+	// single transition call.
+	if flow.CurrentTransition != nil {
+		if flow.CurrentTransition.ParallelCount > 0 {
+			return baseWorker.processParallelFork(&workerSessionContext)
+		}
+		if flow.CurrentTransition.WaitJoin != "" {
+			return baseWorker.processParallelWait(&workerSessionContext)
+		}
+	}
+
 	// Bind call arguments to target state parameters (if provided)
 	if flow.CurrentTransition != nil && flow.CurrentState != nil && flow.CurrentTransition.Options != nil {
 		// prefer param names from transition; fallback to state _params
@@ -451,7 +462,13 @@ func (baseWorker *workflowWorker) ProcessState(w EngineInterface, flow *domain.F
 			}
 
 			if result.Error != nil {
-				workerSessionContext.Worker.SetError(issues.NewIssueFromError(result.Error))
+				// Preserve the status code the transition chose (404, 409, …);
+				// SetError without a code resets it to 500.
+				if result.StatusCode > 0 {
+					workerSessionContext.Worker.SetError(issues.NewIssueFromError(result.Error), result.StatusCode)
+				} else {
+					workerSessionContext.Worker.SetError(issues.NewIssueFromError(result.Error))
+				}
 			}
 
 			if workerSessionContext.Flow.CurrentTransition.Response != "" {
