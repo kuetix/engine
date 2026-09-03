@@ -29,18 +29,33 @@ const (
 	serverVersion = "0.1.0"
 )
 
+// runnerBin and runScratchDir configure wsl_run (see run.go): runnerBin is
+// the path to the `runner` binary (github.com/kuetix/runner) used as the
+// execution sandbox, and runScratchDir is where inline/one-off WSL/SWSL
+// source gets written to disk before the runner executes it. Package-level
+// because tools.go's handlers need them and are registered before main()
+// finishes parsing flags.
+var (
+	runnerBin     string
+	runScratchDir string
+)
+
 func main() {
 	var (
-		httpAddr     = flag.String("http", "", "HTTP listen address (e.g. :8080). If empty, stdio is used.")
-		transport    = flag.String("transport", "sse", "HTTP transport when -http is set: 'sse' or 'http' (streamable HTTP, used by GitHub Copilot).")
-		baseURL      = flag.String("base-url", "", "Public base URL advertised to SSE clients (optional, SSE only).")
-		ssePath      = flag.String("sse-path", "/sse", "SSE endpoint path (SSE transport only).")
-		messagePath  = flag.String("message-path", "/message", "Message endpoint path (SSE transport only).")
-		endpointPath = flag.String("endpoint-path", "/mcp", "Endpoint path for streamable HTTP transport.")
-		stateless    = flag.Bool("stateless", false, "Run streamable HTTP transport in stateless mode.")
-		pidFile      = flag.String("pid-file", "", "Write process PID to this file and remove on exit.")
+		httpAddr          = flag.String("http", "", "HTTP listen address (e.g. :8080). If empty, stdio is used.")
+		transport         = flag.String("transport", "sse", "HTTP transport when -http is set: 'sse' or 'http' (streamable HTTP, used by GitHub Copilot).")
+		baseURL           = flag.String("base-url", "", "Public base URL advertised to SSE clients (optional, SSE only).")
+		ssePath           = flag.String("sse-path", "/sse", "SSE endpoint path (SSE transport only).")
+		messagePath       = flag.String("message-path", "/message", "Message endpoint path (SSE transport only).")
+		endpointPath      = flag.String("endpoint-path", "/mcp", "Endpoint path for streamable HTTP transport.")
+		stateless         = flag.Bool("stateless", false, "Run streamable HTTP transport in stateless mode.")
+		pidFile           = flag.String("pid-file", "", "Write process PID to this file and remove on exit.")
+		runnerBinFlag     = flag.String("runner-bin", os.Getenv("KUETIX_RUNNER_BIN"), "Path to the kuetix `runner` binary used by wsl_run to execute workflows. Defaults to $KUETIX_RUNNER_BIN.")
+		runScratchDirFlag = flag.String("run-scratch-dir", "runtime/mcp-runs", "Directory wsl_run writes inline/one-off WSL source to before executing it.")
 	)
 	flag.Parse()
+	runnerBin = *runnerBinFlag
+	runScratchDir = *runScratchDirFlag
 
 	if *pidFile != "" {
 		if err := writePIDFile(*pidFile); err != nil {

@@ -68,6 +68,27 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithString("description", mcp.Description("Optional doc comment for the method.")),
 	), handleTransitionAddMethod)
 
+	s.AddTool(mcp.NewTool("wsl_run",
+		mcp.WithDescription("Execute a WSL/SWSL workflow (generated in-memory or read from disk — same `source`/`path` contract as wsl_parse) using the kuetix `runner` sandbox (std-core + std-http + std-ai actions only; project-specific transitions are not available — check with wsl_workflow_actions first). Returns the execution result and, unless `record_history` is false, records a self-documenting history entry (full source + args + result) via the kuetix API that `wsl_history_get` can fetch later. Requires the server to be started with -runner-bin/$KUETIX_RUNNER_BIN, and (for history) a prior `kue login`."),
+		mcp.WithString("source", mcp.Description("Raw WSL/SWSL source text")),
+		mcp.WithString("path", mcp.Description("Path to a .wsl or .swsl file")),
+		mcp.WithString("filename", mcp.Description("Logical filename for SWSL module-name inference and history labeling")),
+		mcp.WithBoolean("simplified", mcp.Description("Force SWSL parser")),
+		mcp.WithObject("args", mcp.Description("Key/value arguments passed into the workflow's context, e.g. {\"userId\":\"123\"}")),
+		mcp.WithBoolean("record_history", mcp.Description("Record this run to WSL history via the kuetix API. Default true.")),
+	), handleRun)
+
+	s.AddTool(mcp.NewTool("wsl_history_list",
+		mcp.WithDescription("List past WSL/SWSL runs recorded by wsl_run, newest first (summaries only — call wsl_history_get for the full self-documenting record). Requires a prior `kue login`."),
+		mcp.WithNumber("limit", mcp.Description("Max entries to return (default 10, max 200).")),
+		mcp.WithString("cursor", mcp.Description("Pagination cursor from a previous call's response.")),
+	), handleHistoryList)
+
+	s.AddTool(mcp.NewTool("wsl_history_get",
+		mcp.WithDescription("Fetch one WSL run record by id — the full self-documenting entry (original WSL/SWSL source, args, and result) with no other context needed to understand what ran. Requires a prior `kue login`."),
+		mcp.WithString("id", mcp.Description("Run id, as returned by wsl_run or wsl_history_list."), mcp.Required()),
+	), handleHistoryGet)
+
 	s.AddTool(mcp.NewTool("transition_validate",
 		mcp.WithDescription("Validate kuetix transition Go files against the standards: package=transitions, struct name `<namespace>Transitions` embedding workflow.BaseServiceTransition, constructor `New<Namespace>Transitions` returning interfaces.ServiceTransitions, exported methods with named return `(r domain.FlowStepResult)`, and the success contract (sets r.Success, r.StatusCode, r.Response or r.Error). Provide `path` for a single file or `dir` to walk recursively (defaults to 'modules'). Returns per-file diagnostics with severity and line numbers."),
 		mcp.WithString("path", mcp.Description("Path to a single transition .go file to validate.")),
