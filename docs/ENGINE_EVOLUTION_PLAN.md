@@ -15,7 +15,7 @@ Audience: engine maintainers and contributors.
 | 3 | Boolean strictness in `&&`/`||`/`when`/`if` | **truthiness allowed** (JS/Python style): non-empty string, non-zero number, non-null, non-empty list/map are truthy; `null`, `false`, `0`, `""`, `[]`, `{}` are falsy |
 | 4 | `foreach` binding syntax | TBD at Phase 3 |
 | 5 | step-budget defaults | package vars `MaxSteps=10000`, `MaxStateVisits=1000`; a config profile may override |
-| 6 | Phase 6 durable-execution RFC | **write it after Phase 3** |
+| 6 | Phase 6 durable execution | **out of scope — separate project** (2026-09-07); RFC kept as seed material only |
 
 ---
 
@@ -682,24 +682,35 @@ ABI impact of `retry`: **none** (pure engine-side; wire protocol unchanged).
 
 ---
 
-### Phase 6 — durable execution: `wait signal`, human-approval (SEPARATE TRACK)
+### Phase 6 — durable execution — **OUT OF SCOPE for this engine** (2026-09-07)
 
-**RFC written: `RFC_DURABLE_EXECUTION.md`** (decision #6 scheduled this for
-"after Phase 3"; done). It covers the `Run` abstraction + `RunStore` interface,
-the ephemeral-vs-durable execution modes, `wait signal <name> [as alias]
-timeout:` as a new state kind, at-least-once step semantics + the idempotency
-contract, the timer sweeper (which is also how durable-mode `timeout` finally
-works), the `api/` surface for signals and the run inbox, human-approval as a
-composed pattern (not an engine primitive), and a 5-step build order (6a–6e)
-where 6a+6b (store + durable run loop) deliver crash recovery on their own.
+Maintainer decision: durable execution (persisted runs, `wait signal`, resume
+across deploys, timer sweepers, human-approval) is **a separate concern and will
+be a separate project** (a "durable-engine" that embeds or wraps this one). It is
+not a phase of the core engine.
 
-Blocking questions for the maintainer are in §13 of the RFC — most important:
-(2) is at-least-once + idempotency acceptable for v1, or is replay-safe
-memoisation required before shipping `wait`?
+Rationale (and this is the right call): the core engine is a lean, synchronous,
+in-memory workflow executor. Durability drags in a storage layer, run identity,
+at-least-once semantics, event logs, a background timer service, and
+resume-across-process — a different system with different operational
+properties. Bolting it into the core engine would compromise what the core
+engine is good at.
 
-Do not start Phase 6 implementation until those are answered. The persisted-run
-format becomes a compatibility surface; the transition-context ABI question is
-deliberately **not** part of this RFC (cooperative deadline instead).
+`RFC_DURABLE_EXECUTION.md` is **kept as seed material** for that future separate
+project, not as a plan for this repo.
+
+Consequences for the core engine:
+
+- **`wait signal` / human-approval** — not core-engine features. The composition
+  story instead: a transition returns a "pending" result and the *caller*
+  (whatever invoked `RunWorkflow`) is responsible for re-invoking later with the
+  needed state. Orchestration of long-lived / human-in-the-loop processes lives
+  above the engine, or in the future durable-engine.
+- **`timeout` on an action** (the deferred Phase 5 item) — without durability the
+  only clean option is a **cooperative deadline** in `WorkerSessionContext` that
+  long-running transitions may check. Hard cancellation of a reflective call
+  stays impossible without the transition-signature ABI change, which remains
+  off the table. Treat `timeout` as "cooperative only, if built at all".
 
 ---
 
@@ -817,12 +828,12 @@ Extend `engine/workflow/parallel_test.go`:
 | 2 | `let`, expression args, computed `const` | additive | none | 1 |
 | 3 | `foreach`, `while max:` | additive | none | 1, (0) |
 | 4 | heterogeneous `parallel`, `foreach…parallel`, rename decision | additive (+ alias if renamed) | none | 1, 3 |
-| 5 | `retry`, `timeout` state attrs | additive | none (docs: idempotency) | 1 |
-| 6 | durable execution, `wait signal`, human-approval | additive | **yes — persisted-run format** | separate RFC |
+| 5 | `retry` (`timeout` cooperative-only, if built) | additive | none (docs: idempotency) | 1 |
+| ~~6~~ | ~~durable execution~~ — **out of scope**, separate project | — | — | — |
 
-Phases 0–5 keep the WSL↔worker contract frozen. That is deliberate: it means all
-of this can ship without a breaking-change event for the ecosystem, and the
-"validated by engine vX.Y" badge is sufficient to communicate the new
+Every shipped phase keeps the WSL↔worker contract frozen. That is deliberate: it
+means all of this ships without a breaking-change event for the ecosystem, and
+the "validated by engine vX.Y" badge is sufficient to communicate the new
 capabilities.
 
 ---
@@ -836,5 +847,5 @@ capabilities.
 4. `foreach` binding syntax: `foreach x in list` + implicit `x_index`, or
    `foreach x, i in list`? (§5.3)
 5. Step-budget defaults and whether they're per-profile or per-workflow. (§4)
-6. Do we start the Phase 6 durable-execution RFC now in parallel, or after
-   Phase 3? (§5.6)
+6. ~~Phase 6 timing~~ — resolved: durable execution is a separate project, not a
+   phase of this engine.

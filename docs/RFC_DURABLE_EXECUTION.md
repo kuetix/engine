@@ -1,10 +1,19 @@
 # RFC: Durable workflow execution, `wait signal`, human-approval
 
-Status: **draft for discussion.** No code. This is the Phase 6 design doc that
-`ENGINE_EVOLUTION_PLAN.md` decision #6 scheduled for "after Phase 3" — Phases
-0–5 are now landed, so this is the gate before any Phase 6 implementation.
+> **Status (2026-09-07): NOT a plan for this repo.** The maintainer has decided
+> durable execution is a **separate project** — a future "durable-engine" that
+> wraps/embeds the core engine — because it is a fundamentally different system
+> (storage, run identity, at-least-once, timer service, resume-across-process).
+> This document is **kept only as seed material** for that separate project.
+> The core engine stays a lean synchronous in-memory executor. See
+> `ENGINE_EVOLUTION_PLAN.md` §"Phase 6" for the decision and its consequences.
 
-Audience: engine maintainers. Read `ENGINE_EVOLUTION_PLAN.md` first.
+Original framing follows.
+
+---
+
+Audience: whoever builds the separate durable-engine. Read
+`ENGINE_EVOLUTION_PLAN.md` first for the core-engine model this would sit on.
 
 ---
 
