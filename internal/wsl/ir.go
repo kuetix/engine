@@ -20,7 +20,33 @@ func BuildGraph(wf Workflow) *Graph {
 		}
 		// Copy new state attributes
 		if st.IfExpr != nil {
-			n.IfExpr = &Expr{Raw: st.IfExpr.Raw}
+			n.IfExpr = &Expr{Raw: st.IfExpr.Raw, Tree: st.IfExpr.Tree}
+		}
+		for _, lb := range st.Lets {
+			n.Lets = append(n.Lets, LetBinding{Name: lb.Name, Expr: &Expr{Raw: lb.Expr.Raw, Tree: lb.Expr.Tree}})
+		}
+		if st.ForEach != nil {
+			n.ForEach = &ForEach{
+				Var:           st.ForEach.Var,
+				List:          &Expr{Raw: st.ForEach.List.Raw, Tree: st.ForEach.List.Tree},
+				Action:        st.ForEach.Action,
+				Parallel:      st.ForEach.Parallel,
+				ParallelLimit: st.ForEach.ParallelLimit,
+			}
+		}
+		if st.While != nil {
+			n.While = &WhileLoop{
+				Max:    st.While.Max,
+				Cond:   &Expr{Raw: st.While.Cond.Raw, Tree: st.While.Cond.Tree},
+				Action: st.While.Action,
+			}
+		}
+		if st.Retry != nil {
+			rp := &RetryPolicy{Max: st.Retry.Max, Delay: st.Retry.Delay}
+			if st.Retry.On != nil {
+				rp.On = &Expr{Raw: st.Retry.On.Raw, Tree: st.Retry.On.Tree}
+			}
+			n.Retry = rp
 		}
 		n.ContinueOnFail = st.ContinueOnFail
 		n.SkipTo = st.SkipTo
@@ -43,7 +69,7 @@ func BuildGraph(wf Workflow) *Graph {
 				n.Start = true
 			}
 			if tr.WhenExpr != nil {
-				edge.WhenExpr = &Expr{Raw: tr.WhenExpr.Raw}
+				edge.WhenExpr = &Expr{Raw: tr.WhenExpr.Raw, Tree: tr.WhenExpr.Tree}
 			}
 			if len(tr.Args) > 0 {
 				edge.Args = append(edge.Args, tr.Args...)

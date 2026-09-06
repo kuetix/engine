@@ -448,6 +448,16 @@ func (p *parser) parseParallelState() (*CSTState, error) {
 	return st, nil
 }
 
+// isKeywordUsableAsAttrKey reports whether a keyword token may also serve as a
+// bracket-attribute key (its lexeme is a common attribute name).
+func isKeywordUsableAsAttrKey(k TokenKind) bool {
+	switch k {
+	case TokOn, TokError, TokIf, TokWhen:
+		return true
+	}
+	return false
+}
+
 // parseOptionalBracketAttrs parses an optional [key: value, ...] attribute
 // list, e.g. the count in `parallel[count: 6]`. Shared between full WSL and
 // SimplifiedWSL so both surfaces accept identical attribute syntax.
@@ -460,9 +470,19 @@ func (p *parser) parseOptionalBracketAttrs() ([]CSTConstEntry, error) {
 		if p.cur.Kind == TokEOF {
 			return nil, errf(p.cur.Pos, "unexpected EOF in bracket attributes, here: ...%s...", p.lx.Peace(20))
 		}
-		key, err := p.expect(TokIdent)
-		if err != nil {
-			return nil, err
+		// Attribute keys are identifiers, but a few (e.g. `on` in a retry
+		// policy) collide with keywords — accept those by their lexeme.
+		var key Token
+		if p.cur.Kind == TokIdent || isKeywordUsableAsAttrKey(p.cur.Kind) {
+			key = p.cur
+			key.Kind = TokIdent
+			p.next()
+		} else {
+			var err error
+			key, err = p.expect(TokIdent)
+			if err != nil {
+				return nil, err
+			}
 		}
 		colon, err := p.expect(TokColon)
 		if err != nil {
@@ -585,6 +605,23 @@ func (p *parser) parseStateAfterKeyword(stTok Token) (*CSTState, error) {
 		}
 		st.IfExpr = ifExpr
 	}
+	// Zero or more `let <name> = <expr>` bindings.
+	for p.cur.Kind == TokIdent && p.cur.Lexeme == "let" {
+		letStart := p.cur.Pos
+		p.next()
+		nameTok, err := p.expect(TokIdent)
+		if err != nil {
+			return nil, errf(p.cur.Pos, "expected a name after 'let', got %s, here: ...%s...", p.cur.Kind, p.lx.Peace(20))
+		}
+		if _, err := p.expect(TokEqual); err != nil {
+			return nil, errf(p.cur.Pos, "expected '=' after 'let %s', got %s, here: ...%s...", nameTok.Lexeme, p.cur.Kind, p.lx.Peace(20))
+		}
+		val, err := p.parseLetValueExpr()
+		if err != nil {
+			return nil, err
+		}
+		st.Lets = append(st.Lets, CSTLet{Span: Span{Start: letStart, End: p.cur.Pos}, NameTok: nameTok, Val: val})
+	}
 	// Check for 'continue on fail'
 	if p.cur.Kind == TokContinue {
 		p.next()
@@ -606,6 +643,38 @@ func (p *parser) parseStateAfterKeyword(stTok Token) (*CSTState, error) {
 		} else {
 			return nil, errf(p.cur.Pos, "expected 'to' after 'skip', got %s '%s', here: ...%s...", p.cur.Kind, p.cur.Lexeme, p.lx.Peace(20))
 		}
+	}
+
+	// Optional `retry[max: N, delay: "..", on: ".."]` policy for the action.
+	if p.cur.Kind == TokIdent && p.cur.Lexeme == "retry" {
+		tok := p.cur
+		p.next()
+		if p.cur.Kind != TokLBrack {
+			return nil, errf(p.cur.Pos, "expected '[' after 'retry', e.g. retry[max: 3], here: ...%s...", p.lx.Peace(20))
+		}
+		attrs, err := p.parseOptionalBracketAttrs()
+		if err != nil {
+			return nil, err
+		}
+		st.Retry = &CSTRetry{Span: Span{Start: tok.Pos, End: p.cur.Pos}, Tok: tok, Attrs: attrs}
+	}
+
+	// Optional `foreach <name> in <expr> { action ... }` loop body.
+	if p.cur.Kind == TokIdent && p.cur.Lexeme == "foreach" {
+		fe, err := p.parseForEach()
+		if err != nil {
+			return nil, err
+		}
+		st.ForEach = fe
+	}
+
+	// Optional `while[max: N] <expr> { action ... }` loop body.
+	if p.cur.Kind == TokIdent && p.cur.Lexeme == "while" {
+		wl, err := p.parseWhile()
+		if err != nil {
+			return nil, err
+		}
+		st.While = wl
 	}
 
 	// optional action
@@ -925,6 +994,206 @@ func (p *parser) parseExprUntilCommaOrParen() (*CSTExpr, error) {
 		}
 		raw += tokenLexeme(p.cur)
 		p.next()
+	}
+	return &CSTExpr{Raw: raw, Span: Span{Start: start, End: p.cur.Pos}}, nil
+}
+
+// parseForEach parses `foreach <name> in <expr> { action ... }`.
+func (p *parser) parseForEach() (*CSTForEach, error) {
+	start := p.cur.Pos
+	p.next() // consume 'foreach'
+	varTok, err := p.expect(TokIdent)
+	if err != nil {
+		return nil, errf(p.cur.Pos, "expected a loop variable after 'foreach', here: ...%s...", p.lx.Peace(20))
+	}
+	if !(p.cur.Kind == TokIdent && p.cur.Lexeme == "in") {
+		return nil, errf(p.cur.Pos, "expected 'in' after 'foreach %s', here: ...%s...", varTok.Lexeme, p.lx.Peace(20))
+	}
+	p.next() // consume 'in'
+
+	// list expression: raw text until '{' or the optional `parallel[...]`
+	exprStartOff := p.cur.Pos.Offset
+	depthP, depthB := 0, 0
+	for p.cur.Kind != TokEOF {
+		if depthP == 0 && depthB == 0 && (p.cur.Kind == TokLBrace || p.cur.Kind == TokParallel) {
+			break
+		}
+		switch p.cur.Kind {
+		case TokLParen:
+			depthP++
+		case TokRParen:
+			if depthP > 0 {
+				depthP--
+			}
+		case TokLBrack:
+			depthB++
+		case TokRBrack:
+			if depthB > 0 {
+				depthB--
+			}
+		}
+		p.next()
+	}
+	rawList := strings.TrimSpace(p.lx.src[exprStartOff:p.cur.Pos.Offset])
+	if rawList == "" {
+		return nil, errf(p.cur.Pos, "empty 'foreach' collection expression, here: ...%s...", p.lx.Peace(20))
+	}
+
+	// optional `parallel[limit: K]`
+	var parallelTok *Token
+	var parallelAttrs []CSTConstEntry
+	if p.cur.Kind == TokParallel {
+		tok := p.cur
+		parallelTok = &tok
+		p.next()
+		attrs, err := p.parseOptionalBracketAttrs()
+		if err != nil {
+			return nil, err
+		}
+		parallelAttrs = attrs
+	}
+
+	if p.cur.Kind != TokLBrace {
+		return nil, errf(p.cur.Pos, "expected '{' to open the 'foreach' body, here: ...%s...", p.lx.Peace(20))
+	}
+	lbr := p.cur
+	p.next() // consume '{'
+
+	if p.cur.Kind != TokAction {
+		return nil, errf(p.cur.Pos, "'foreach' body must contain a single 'action', here: ...%s...", p.lx.Peace(20))
+	}
+	act, err := p.parseAction()
+	if err != nil {
+		return nil, err
+	}
+	rbr, err := p.expect(TokRBrace)
+	if err != nil {
+		return nil, errf(p.cur.Pos, "expected '}' to close the 'foreach' body (only one action is allowed), here: ...%s...", p.lx.Peace(20))
+	}
+	return &CSTForEach{
+		Span:          Span{Start: start, End: rbr.Pos},
+		VarTok:        varTok,
+		InExpr:        &CSTExpr{Raw: rawList, Span: Span{Start: start, End: lbr.Pos}},
+		ParallelTok:   parallelTok,
+		ParallelAttrs: parallelAttrs,
+		LBrace:        lbr,
+		Action:        act,
+		RBrace:        rbr,
+	}, nil
+}
+
+// parseWhile parses `while[max: N] <expr> { action ... }`.
+func (p *parser) parseWhile() (*CSTWhile, error) {
+	start := p.cur.Pos
+	tok := p.cur
+	p.next() // consume 'while'
+	if p.cur.Kind != TokLBrack {
+		return nil, errf(p.cur.Pos, "expected '[max: N]' after 'while', here: ...%s...", p.lx.Peace(20))
+	}
+	attrs, err := p.parseOptionalBracketAttrs()
+	if err != nil {
+		return nil, err
+	}
+
+	// condition expression: raw text until '{'
+	condStartOff := p.cur.Pos.Offset
+	depthP, depthB := 0, 0
+	for p.cur.Kind != TokEOF {
+		if p.cur.Kind == TokLBrace && depthP == 0 && depthB == 0 {
+			break
+		}
+		switch p.cur.Kind {
+		case TokLParen:
+			depthP++
+		case TokRParen:
+			if depthP > 0 {
+				depthP--
+			}
+		case TokLBrack:
+			depthB++
+		case TokRBrack:
+			if depthB > 0 {
+				depthB--
+			}
+		}
+		p.next()
+	}
+	if p.cur.Kind != TokLBrace {
+		return nil, errf(p.cur.Pos, "expected '{' to open the 'while' body, here: ...%s...", p.lx.Peace(20))
+	}
+	rawCond := strings.TrimSpace(p.lx.src[condStartOff:p.cur.Pos.Offset])
+	if rawCond == "" {
+		return nil, errf(p.cur.Pos, "empty 'while' condition expression, here: ...%s...", p.lx.Peace(20))
+	}
+	lbr := p.cur
+	p.next() // consume '{'
+
+	if p.cur.Kind != TokAction {
+		return nil, errf(p.cur.Pos, "'while' body must contain a single 'action', here: ...%s...", p.lx.Peace(20))
+	}
+	act, err := p.parseAction()
+	if err != nil {
+		return nil, err
+	}
+	rbr, err := p.expect(TokRBrace)
+	if err != nil {
+		return nil, errf(p.cur.Pos, "expected '}' to close the 'while' body (only one action is allowed), here: ...%s...", p.lx.Peace(20))
+	}
+	return &CSTWhile{
+		Span:     Span{Start: start, End: rbr.Pos},
+		Tok:      tok,
+		Attrs:    attrs,
+		CondExpr: &CSTExpr{Raw: rawCond, Span: Span{Start: start, End: lbr.Pos}},
+		LBrace:   lbr,
+		Action:   act,
+		RBrace:   rbr,
+	}, nil
+}
+
+// parseLetValueExpr captures the raw source text of a `let` binding's value,
+// stopping at the next statement in the state body. It slices the source
+// directly (rather than re-serialising tokens) so arithmetic operators the
+// WSL lexer does not tokenise (`* + %`) survive into the expression string,
+// where the expression parser handles them.
+func (p *parser) parseLetValueExpr() (*CSTExpr, error) {
+	start := p.cur.Pos
+	startOff := p.cur.Pos.Offset
+	parenDepth, brackDepth, braceDepth := 0, 0, 0
+	for p.cur.Kind != TokEOF {
+		if parenDepth == 0 && brackDepth == 0 && braceDepth == 0 {
+			if p.cur.Kind == TokAction || p.cur.Kind == TokOn || p.cur.Kind == TokEnd ||
+				p.cur.Kind == TokContinue || p.cur.Kind == TokSkip || p.cur.Kind == TokIf ||
+				p.cur.Kind == TokRBrace || (p.cur.Kind == TokIdent && p.cur.Lexeme == "let") {
+				break
+			}
+		}
+		switch p.cur.Kind {
+		case TokLParen:
+			parenDepth++
+		case TokRParen:
+			if parenDepth > 0 {
+				parenDepth--
+			}
+		case TokLBrack:
+			brackDepth++
+		case TokRBrack:
+			if brackDepth > 0 {
+				brackDepth--
+			}
+		case TokLBrace:
+			braceDepth++
+		case TokRBrace:
+			braceDepth--
+		}
+		p.next()
+	}
+	endOff := p.cur.Pos.Offset
+	if p.cur.Kind == TokEOF || endOff < startOff || endOff > len(p.lx.src) {
+		endOff = len(p.lx.src)
+	}
+	raw := strings.TrimSpace(p.lx.src[startOff:endOff])
+	if raw == "" {
+		return nil, errf(p.cur.Pos, "empty 'let' value, expected an expression, here: ...%s...", p.lx.Peace(20))
 	}
 	return &CSTExpr{Raw: raw, Span: Span{Start: start, End: p.cur.Pos}}, nil
 }

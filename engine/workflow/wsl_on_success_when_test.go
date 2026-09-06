@@ -188,21 +188,30 @@ func TestWSLOnSuccessWhen_Integration(t *testing.T) {
 			t.Fatal("CheckVersion transition not found")
 		}
 
-		// Verify on_success_when captures the first condition
-		oswValue, ok := checkVersionTransition["on_success_when"]
+		// With several `on success when` edges, each becomes an ordered guard
+		// and the unguarded `on success` becomes the fallback (true).
+		guardsValue, ok := checkVersionTransition["guards"]
 		if !ok {
-			t.Error("on_success_when should be present")
+			t.Fatal("guards should be present for multiple on-success-when edges")
 		}
-
-		oswStr, ok := oswValue.(string)
+		guards, ok := guardsValue.([]map[string]interface{})
 		if !ok {
-			t.Error("on_success_when should be a string")
+			t.Fatalf("guards should be []map[string]interface{}, got %T", guardsValue)
 		}
-
-		// Should capture the first on success when condition
-		expectedCondition := "$constants.version == \"1.0.0\""
-		if oswStr != expectedCondition {
-			t.Errorf("Expected first on_success_when to be '%s', got '%s'", expectedCondition, oswStr)
+		if len(guards) != 2 {
+			t.Fatalf("expected 2 guards, got %d", len(guards))
+		}
+		if guards[0]["when"] != "$constants.version == \"1.0.0\"" || guards[0]["to"] != "VersionOne" {
+			t.Errorf("guard[0] = %v", guards[0])
+		}
+		if guards[1]["when"] != "$constants.version == \"2.0.0\"" || guards[1]["to"] != "VersionTwo" {
+			t.Errorf("guard[1] = %v", guards[1])
+		}
+		if checkVersionTransition["true"] != "DefaultVersion" {
+			t.Errorf("unguarded fallback (true) = %v, want DefaultVersion", checkVersionTransition["true"])
+		}
+		if _, hasOsw := checkVersionTransition["on_success_when"]; hasOsw {
+			t.Error("on_success_when should not be set when guards are present")
 		}
 	})
 

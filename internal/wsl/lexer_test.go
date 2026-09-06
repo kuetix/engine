@@ -105,6 +105,60 @@ func TestLexer_ArrayBrackets(t *testing.T) {
 	}
 }
 
+func TestLexer_ComparisonAndLogicalOperators(t *testing.T) {
+	// Each input must lex to exactly the expected token kinds (excluding EOF).
+	cases := []struct {
+		src  string
+		want []TokenKind
+	}{
+		{`==`, []TokenKind{TokEqEq}},
+		{`!=`, []TokenKind{TokNeq}},
+		{`>=`, []TokenKind{TokGte}},
+		{`<=`, []TokenKind{TokLte}},
+		{`&&`, []TokenKind{TokAndAnd}},
+		{`||`, []TokenKind{TokOrOr}},
+		// single-char operators still lex as before
+		{`=`, []TokenKind{TokEqual}},
+		{`>`, []TokenKind{TokGt}},
+		{`<`, []TokenKind{TokLt}},
+		{`!`, []TokenKind{TokBang}},
+		// arrows must still win over <= / >= adjacency
+		{`->`, []TokenKind{TokArrow}},
+		{`<-`, []TokenKind{TokLeftArrow}},
+		// realistic expression: a == b && c >= 1
+		{`a == b && c >= 1`, []TokenKind{TokIdent, TokEqEq, TokIdent, TokAndAnd, TokIdent, TokGte, TokNumber}},
+		// not-equal against identifier, no spaces
+		{`x!=y`, []TokenKind{TokIdent, TokNeq, TokIdent}},
+		// attribute assignment still uses single '='
+		{`code = "OK"`, []TokenKind{TokIdent, TokEqual, TokString}},
+		// bang followed by identifier (logical not) stays TokBang
+		{`!ready`, []TokenKind{TokBang, TokIdent}},
+	}
+
+	for _, c := range cases {
+		lx := NewLexer(c.src)
+		var got []TokenKind
+		for {
+			tok := lx.Next()
+			if tok.Kind == TokEOF {
+				break
+			}
+			if tok.Kind == TokIllegal {
+				t.Fatalf("%q: illegal token %q", c.src, tok.Lexeme)
+			}
+			got = append(got, tok.Kind)
+		}
+		if len(got) != len(c.want) {
+			t.Fatalf("%q: got %d tokens %v, want %d %v", c.src, len(got), got, len(c.want), c.want)
+		}
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Errorf("%q token %d: got %s, want %s", c.src, i, got[i], c.want[i])
+			}
+		}
+	}
+}
+
 func TestLexer_SpecialDollarVariables(t *testing.T) {
 	src := `module m
 workflow w { start: s

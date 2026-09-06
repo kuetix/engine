@@ -24,9 +24,17 @@ type httpTransport interface {
 	Shutdown(ctx context.Context) error
 }
 
-const (
-	serverName    = "kuetix-engine"
-	serverVersion = "0.1.0"
+const serverName = "kuetix-engine"
+
+// Version and BuildTime are injected at build time via -ldflags
+// (see the Makefile / .goreleaser.yaml). They fall back to a dev default so
+// `go run` / `go build` without ldflags still work.
+var (
+	Version   = "0.1.0-dev"
+	BuildTime = "unknown"
+
+	// serverVersion is the version string advertised to MCP clients.
+	serverVersion = Version
 )
 
 // runnerBin and runScratchDir configure wsl_run (see run.go): runnerBin is

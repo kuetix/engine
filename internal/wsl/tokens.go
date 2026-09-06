@@ -59,6 +59,12 @@ const (
 	TokGt        // >
 	TokLt        // <
 	TokBang      // !
+	TokEqEq      // ==
+	TokNeq       // !=
+	TokGte       // >=
+	TokLte       // <=
+	TokAndAnd    // &&
+	TokOrOr      // ||
 )
 
 // Position tracks a point in source.
@@ -171,6 +177,18 @@ func (k TokenKind) String() string {
 		return "<"
 	case TokBang:
 		return "!"
+	case TokEqEq:
+		return "=="
+	case TokNeq:
+		return "!="
+	case TokGte:
+		return ">="
+	case TokLte:
+		return "<="
+	case TokAndAnd:
+		return "&&"
+	case TokOrOr:
+		return "||"
 	default:
 		return "?"
 	}
