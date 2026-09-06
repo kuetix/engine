@@ -684,20 +684,22 @@ ABI impact of `retry`: **none** (pure engine-side; wire protocol unchanged).
 
 ### Phase 6 — durable execution: `wait signal`, human-approval (SEPARATE TRACK)
 
-This is the big one and **must not be bolted onto the above**. It requires:
+**RFC written: `RFC_DURABLE_EXECUTION.md`** (decision #6 scheduled this for
+"after Phase 3"; done). It covers the `Run` abstraction + `RunStore` interface,
+the ephemeral-vs-durable execution modes, `wait signal <name> [as alias]
+timeout:` as a new state kind, at-least-once step semantics + the idempotency
+contract, the timer sweeper (which is also how durable-mode `timeout` finally
+works), the `api/` surface for signals and the run inbox, human-approval as a
+composed pattern (not an engine primitive), and a 5-step build order (6a–6e)
+where 6a+6b (store + durable run loop) deliver crash recovery on their own.
 
-- **Workflow-run persistence** — the ability to serialise a paused run
-  (position, context, bindings, in-flight parallel groups) to storage and resume
-  it later, possibly in a different process.
-- A **signal/event ingress** API (registry API surface) to deliver
-  `signal(runId, name, payload)`.
-- `wait signal <name> [timeout: <dur>] -> State` as a state that suspends the run.
-- Human-approval = `wait signal approval` + a transition that creates the
-  approval task in the business system + a UI/endpoint that posts the signal.
+Blocking questions for the maintainer are in §13 of the RFC — most important:
+(2) is at-least-once + idempotency acceptable for v1, or is replay-safe
+memoisation required before shipping `wait`?
 
-Prerequisite design doc: **"Durable workflow execution & signals"** — separate
-RFC. Do not start Phase 6 implementation until that lands. It *does* have ABI
-implications (persisted-run format becomes a compatibility surface).
+Do not start Phase 6 implementation until those are answered. The persisted-run
+format becomes a compatibility surface; the transition-context ABI question is
+deliberately **not** part of this RFC (cooperative deadline instead).
 
 ---
 
