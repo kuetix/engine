@@ -63,11 +63,12 @@ type CSTState struct {
 	RParen *Token
 	LBrace Token
 	// Optional state attributes
-	IfTok          *Token   // 'if' keyword
-	IfExpr         *CSTExpr // if condition expression
-	Lets           []CSTLet // 'let name = <expr>' bindings, in source order
-	ContinueOnFail bool     // 'continue on fail' flag
-	SkipTo         bool     // 'skip to' flag
+	IfTok          *Token      // 'if' keyword
+	IfExpr         *CSTExpr    // if condition expression
+	Lets           []CSTLet    // 'let name = <expr>' bindings, in source order
+	ForEach        *CSTForEach // 'foreach x in <expr> { action ... }' loop body
+	ContinueOnFail bool        // 'continue on fail' flag
+	SkipTo         bool        // 'skip to' flag
 	// Parallel fork state: parallel[count: N] Name { ... }
 	Parallel      bool
 	ParallelAttrs []CSTConstEntry // attributes from the [ ... ] list (count, ...)
@@ -138,6 +139,16 @@ type CSTLet struct {
 	Span    Span
 	NameTok Token
 	Val     *CSTExpr
+}
+
+// CSTForEach is a `foreach <name> in <expr> { action ... }` loop body.
+type CSTForEach struct {
+	Span   Span
+	VarTok Token
+	InExpr *CSTExpr
+	LBrace Token
+	Action *CSTAction
+	RBrace Token
 }
 
 type CSTConstBlock struct {

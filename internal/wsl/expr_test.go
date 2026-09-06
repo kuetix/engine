@@ -213,6 +213,66 @@ workflow bad {
 	}
 }
 
+func TestForEach_Parse(t *testing.T) {
+	src := `
+module fe
+workflow fe {
+  start: PostLines
+  state PostLines {
+    foreach line in <<invoice.lines>> {
+      action ledger/ledger.Post(amount: line.amount) as posted
+    }
+    on success -> Done
+    on fail -> Rollback
+  }
+  state Done { end ok }
+  state Rollback { end fail }
+}
+`
+	ast, _, err := ParseAll(src, "fe")
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+	s := ast.Workflows[0].States["PostLines"]
+	if s.ForEach == nil {
+		t.Fatal("expected ForEach on the state")
+	}
+	if s.ForEach.Var != "line" {
+		t.Errorf("loop var = %q, want line", s.ForEach.Var)
+	}
+	if s.ForEach.List == nil || s.ForEach.List.Tree == nil {
+		t.Error("expected a parsed tree for the collection expression")
+	}
+	if s.ForEach.Action == nil || s.ForEach.Action.Name != "Post" {
+		t.Errorf("body action = %+v, want Post", s.ForEach.Action)
+	}
+	// body action is also the state's action (arg injection reuse)
+	if s.Action != s.ForEach.Action {
+		t.Error("state action should be the foreach body action")
+	}
+}
+
+func TestForEach_RejectMalformedCollection(t *testing.T) {
+	src := `
+module bad
+workflow bad {
+  start: S
+  state S {
+    foreach x in 1 + {
+      action a/a.Do(v: x) as r
+    }
+    on success -> Done
+    on fail -> Failed
+  }
+  state Done { end ok }
+  state Failed { end fail }
+}
+`
+	if _, _, err := ParseAll(src, "bad"); err == nil {
+		t.Fatal("expected an error for a malformed foreach collection expression")
+	}
+}
+
 func TestParseExpr_Shape(t *testing.T) {
 	// precedence: 1 + 2 * 3  =>  (+ 1 (* 2 3))
 	n, err := ParseExpr(`1 + 2 * 3`)

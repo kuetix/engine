@@ -57,6 +57,8 @@ type FlowTransition struct {
 	OnSuccessWhen  *string                `json:"on_success_when,omitempty"`
 	Guards         []FlowGuard            `json:"guards,omitempty" mapstructure:"guards,omitempty"`
 	Lets           []FlowLet              `json:"lets,omitempty" mapstructure:"lets,omitempty"`
+	ForEachVar     string                 `json:"foreach_var,omitempty" mapstructure:"foreach_var,omitempty"`
+	ForEachList    string                 `json:"foreach_list,omitempty" mapstructure:"foreach_list,omitempty"`
 	SkipTo         *bool                  `json:"skipTo,omitempty"`
 	ParallelCount  int                    `json:"parallel_count,omitempty" mapstructure:"parallel_count,omitempty"`
 	WaitJoin       string                 `json:"wait_join,omitempty" mapstructure:"wait_join,omitempty"`

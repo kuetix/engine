@@ -25,6 +25,13 @@ func BuildGraph(wf Workflow) *Graph {
 		for _, lb := range st.Lets {
 			n.Lets = append(n.Lets, LetBinding{Name: lb.Name, Expr: &Expr{Raw: lb.Expr.Raw, Tree: lb.Expr.Tree}})
 		}
+		if st.ForEach != nil {
+			n.ForEach = &ForEach{
+				Var:    st.ForEach.Var,
+				List:   &Expr{Raw: st.ForEach.List.Raw, Tree: st.ForEach.List.Tree},
+				Action: st.ForEach.Action,
+			}
+		}
 		n.ContinueOnFail = st.ContinueOnFail
 		n.SkipTo = st.SkipTo
 		n.Parallel = st.Parallel

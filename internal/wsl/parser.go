@@ -625,6 +625,15 @@ func (p *parser) parseStateAfterKeyword(stTok Token) (*CSTState, error) {
 		}
 	}
 
+	// Optional `foreach <name> in <expr> { action ... }` loop body.
+	if p.cur.Kind == TokIdent && p.cur.Lexeme == "foreach" {
+		fe, err := p.parseForEach()
+		if err != nil {
+			return nil, err
+		}
+		st.ForEach = fe
+	}
+
 	// optional action
 	if p.cur.Kind == TokAction {
 		act, err := p.parseAction()
@@ -944,6 +953,73 @@ func (p *parser) parseExprUntilCommaOrParen() (*CSTExpr, error) {
 		p.next()
 	}
 	return &CSTExpr{Raw: raw, Span: Span{Start: start, End: p.cur.Pos}}, nil
+}
+
+// parseForEach parses `foreach <name> in <expr> { action ... }`.
+func (p *parser) parseForEach() (*CSTForEach, error) {
+	start := p.cur.Pos
+	p.next() // consume 'foreach'
+	varTok, err := p.expect(TokIdent)
+	if err != nil {
+		return nil, errf(p.cur.Pos, "expected a loop variable after 'foreach', here: ...%s...", p.lx.Peace(20))
+	}
+	if !(p.cur.Kind == TokIdent && p.cur.Lexeme == "in") {
+		return nil, errf(p.cur.Pos, "expected 'in' after 'foreach %s', here: ...%s...", varTok.Lexeme, p.lx.Peace(20))
+	}
+	p.next() // consume 'in'
+
+	// list expression: raw text until '{'
+	exprStartOff := p.cur.Pos.Offset
+	depthP, depthB := 0, 0
+	for p.cur.Kind != TokEOF {
+		if p.cur.Kind == TokLBrace && depthP == 0 && depthB == 0 {
+			break
+		}
+		switch p.cur.Kind {
+		case TokLParen:
+			depthP++
+		case TokRParen:
+			if depthP > 0 {
+				depthP--
+			}
+		case TokLBrack:
+			depthB++
+		case TokRBrack:
+			if depthB > 0 {
+				depthB--
+			}
+		}
+		p.next()
+	}
+	if p.cur.Kind != TokLBrace {
+		return nil, errf(p.cur.Pos, "expected '{' to open the 'foreach' body, here: ...%s...", p.lx.Peace(20))
+	}
+	rawList := strings.TrimSpace(p.lx.src[exprStartOff:p.cur.Pos.Offset])
+	if rawList == "" {
+		return nil, errf(p.cur.Pos, "empty 'foreach' collection expression, here: ...%s...", p.lx.Peace(20))
+	}
+	lbr := p.cur
+	p.next() // consume '{'
+
+	if p.cur.Kind != TokAction {
+		return nil, errf(p.cur.Pos, "'foreach' body must contain a single 'action', here: ...%s...", p.lx.Peace(20))
+	}
+	act, err := p.parseAction()
+	if err != nil {
+		return nil, err
+	}
+	rbr, err := p.expect(TokRBrace)
+	if err != nil {
+		return nil, errf(p.cur.Pos, "expected '}' to close the 'foreach' body (only one action is allowed), here: ...%s...", p.lx.Peace(20))
+	}
+	return &CSTForEach{
+		Span:   Span{Start: start, End: rbr.Pos},
+		VarTok: varTok,
+		InExpr: &CSTExpr{Raw: rawList, Span: Span{Start: start, End: lbr.Pos}},
+		LBrace: lbr,
+		Action: act,
+		RBrace: rbr,
+	}, nil
 }
 
 // parseLetValueExpr captures the raw source text of a `let` binding's value,

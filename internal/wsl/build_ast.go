@@ -101,6 +101,20 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 			if cs.Action != nil {
 				st.Action = toAction(cs.Action)
 			}
+			if cs.ForEach != nil {
+				if cs.Action != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': a 'foreach' state cannot also have a top-level 'action'", st.Name, wf.Name)}
+				}
+				le, err := parseValidatedExpr(cs.ForEach.InExpr.Raw, fmt.Sprintf("'foreach' collection in state '%s' of workflow '%s'", st.Name, wf.Name))
+				if err != nil {
+					return nil, err
+				}
+				body := toAction(cs.ForEach.Action)
+				st.ForEach = &ForEach{Var: cs.ForEach.VarTok.Lexeme, List: le, Action: body}
+				// The body action is also the state's action so the existing
+				// arg-injection / alias / resolver handling applies unchanged.
+				st.Action = body
+			}
 			for _, ct := range cs.Transitions {
 				cond := toCondition(ct.Cond)
 				target := ct.TargetTok.Lexeme

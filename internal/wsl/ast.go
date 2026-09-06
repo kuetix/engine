@@ -42,12 +42,24 @@ type LetBinding struct {
 	Expr *Expr
 }
 
+// ForEach is a `foreach <Var> in <List> { <Action> }` loop. The engine
+// evaluates List to a slice, then runs Action once per element with <Var> and
+// <Var>_index bound in scope. Iteration stops on the first failure (the state's
+// `on fail` path is taken); on full success the state's `on success` path is
+// taken and the action alias (if any) is bound to the ordered result slice.
+type ForEach struct {
+	Var    string
+	List   *Expr
+	Action *Action
+}
+
 type State struct {
 	Name           string
 	Params         []string
 	Action         *Action
 	Transitions    []Transition
 	Lets           []LetBinding
+	ForEach        *ForEach
 	Start          bool
 	End            *End
 	IfExpr         *Expr // optional if condition expression
@@ -137,6 +149,7 @@ type Node struct {
 	Attr           map[string]string // for end nodes
 	IfExpr         *Expr             // optional if condition expression
 	Lets           []LetBinding      // let bindings evaluated on state entry
+	ForEach        *ForEach          // optional foreach loop body
 	ContinueOnFail bool              // continue on fail flag
 	SkipTo         bool              // skip to flag
 	// Parallel fork/join

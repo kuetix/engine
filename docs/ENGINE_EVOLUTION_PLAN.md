@@ -424,7 +424,57 @@ ABI impact: **none**.
 
 ---
 
-### Phase 3 — `foreach` (sequential) + `while` (guarded)
+### Phase 3 — `foreach` (sequential) — **DONE (first cut)** · `while` — not started
+
+**`foreach` shipped** on `engine-evolution`. Syntax landed (slightly tighter than
+the original sketch — one action per body, no per-iteration `on` edges yet):
+
+```wsl
+state PostLines {
+  foreach line in <<invoice.lines>> {
+    action ledger/ledger.Post(amount: line.amount) as posted
+  }
+  on success -> Done       # after all iterations
+  on fail -> Rollback
+}
+```
+
+- Grammar: `foreach <name> in <expr> { action ... }` in the state body (after
+  `if`/`let`). `foreach` is a contextual identifier — no lexer keyword. The body
+  is exactly one `action` (with optional `as alias`). A `foreach` state may not
+  also carry a top-level `action` (build error).
+- CST `CSTForEach` → AST `State.ForEach *ForEach{Var, List *Expr, Action}` (the
+  body action is also `State.Action` so arg injection / alias / resolver
+  handling is unchanged) → IR `Node.ForEach` → schema `foreach_var` /
+  `foreach_list` → `domain.FlowTransition.ForEachVar` / `ForEachList`.
+- Build time: the collection expression is parsed via `ParseExpr`
+  (malformed → `wsl_validate` failure).
+- Runtime (`engine/workflow/foreach.go` `processForEach`, dispatched from
+  `ProcessState` right after `let`): evaluates the collection to a slice, then
+  calls the body action once per element via `CallTransitionByName` (the
+  `parallel.go` pattern) with `<var>` and `<var>_index` bound in the shared
+  context each iteration. Bounded by slice length + the Phase 0 `MaxSteps` guard.
+  - empty / null collection → 0 iterations → `on success`
+  - non-list collection → error (400), no iterations
+  - first iteration failure → stop, take `on fail` (`False`), aggregated error;
+    no `on fail` → hard stop
+  - full success → the action alias is bound to the ordered `[]response`, then
+    the `on success` path (first truthy `on success when` guard, else the
+    unguarded `on success`)
+- Tests: `internal/wsl/expr_test.go` (`TestForEach_Parse` / `_RejectMalformedCollection`),
+  `engine/workflow/foreach_test.go` (all-succeed routes to Done + alias is a
+  3-slice + `line`/`line_index` bound; empty list; iteration-failure → Rollback
+  stopping after the failure; non-list errors; full WSL→schema→`CorrectFlow`
+  pipeline), `engine/workflow/worker_guards_test.go` build-reject test.
+- **Not done:** per-iteration `on success -> _ / on fail -> X` inside the body;
+  `foreach x, i in …` index-name syntax; `foreach … parallel[limit: K]`
+  (that's Phase 4); loop-var shadow lint; SWSL `foreach`.
+
+**`while <expr> max: N` — not started.** Needs the mandatory `max:` guard and
+per-iteration re-evaluation; its own increment.
+
+<details>
+<summary>Original Phase 3 design</summary>
 
 **`foreach`** — the 90% case ("for each line item, post a ledger entry"):
 
@@ -469,6 +519,8 @@ state Drain {
 **`foreach … parallel`** — see Phase 4.
 
 ABI impact: **none** (new syntax, engine-side execution).
+
+</details>
 
 ---
 
