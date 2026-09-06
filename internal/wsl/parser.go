@@ -968,11 +968,11 @@ func (p *parser) parseForEach() (*CSTForEach, error) {
 	}
 	p.next() // consume 'in'
 
-	// list expression: raw text until '{'
+	// list expression: raw text until '{' or the optional `parallel[...]`
 	exprStartOff := p.cur.Pos.Offset
 	depthP, depthB := 0, 0
 	for p.cur.Kind != TokEOF {
-		if p.cur.Kind == TokLBrace && depthP == 0 && depthB == 0 {
+		if depthP == 0 && depthB == 0 && (p.cur.Kind == TokLBrace || p.cur.Kind == TokParallel) {
 			break
 		}
 		switch p.cur.Kind {
@@ -991,12 +991,27 @@ func (p *parser) parseForEach() (*CSTForEach, error) {
 		}
 		p.next()
 	}
-	if p.cur.Kind != TokLBrace {
-		return nil, errf(p.cur.Pos, "expected '{' to open the 'foreach' body, here: ...%s...", p.lx.Peace(20))
-	}
 	rawList := strings.TrimSpace(p.lx.src[exprStartOff:p.cur.Pos.Offset])
 	if rawList == "" {
 		return nil, errf(p.cur.Pos, "empty 'foreach' collection expression, here: ...%s...", p.lx.Peace(20))
+	}
+
+	// optional `parallel[limit: K]`
+	var parallelTok *Token
+	var parallelAttrs []CSTConstEntry
+	if p.cur.Kind == TokParallel {
+		tok := p.cur
+		parallelTok = &tok
+		p.next()
+		attrs, err := p.parseOptionalBracketAttrs()
+		if err != nil {
+			return nil, err
+		}
+		parallelAttrs = attrs
+	}
+
+	if p.cur.Kind != TokLBrace {
+		return nil, errf(p.cur.Pos, "expected '{' to open the 'foreach' body, here: ...%s...", p.lx.Peace(20))
 	}
 	lbr := p.cur
 	p.next() // consume '{'
@@ -1013,12 +1028,14 @@ func (p *parser) parseForEach() (*CSTForEach, error) {
 		return nil, errf(p.cur.Pos, "expected '}' to close the 'foreach' body (only one action is allowed), here: ...%s...", p.lx.Peace(20))
 	}
 	return &CSTForEach{
-		Span:   Span{Start: start, End: rbr.Pos},
-		VarTok: varTok,
-		InExpr: &CSTExpr{Raw: rawList, Span: Span{Start: start, End: lbr.Pos}},
-		LBrace: lbr,
-		Action: act,
-		RBrace: rbr,
+		Span:          Span{Start: start, End: rbr.Pos},
+		VarTok:        varTok,
+		InExpr:        &CSTExpr{Raw: rawList, Span: Span{Start: start, End: lbr.Pos}},
+		ParallelTok:   parallelTok,
+		ParallelAttrs: parallelAttrs,
+		LBrace:        lbr,
+		Action:        act,
+		RBrace:        rbr,
 	}, nil
 }
 

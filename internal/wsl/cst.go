@@ -141,14 +141,17 @@ type CSTLet struct {
 	Val     *CSTExpr
 }
 
-// CSTForEach is a `foreach <name> in <expr> { action ... }` loop body.
+// CSTForEach is a `foreach <name> in <expr> [parallel[limit: K]] { action ... }`
+// loop body.
 type CSTForEach struct {
-	Span   Span
-	VarTok Token
-	InExpr *CSTExpr
-	LBrace Token
-	Action *CSTAction
-	RBrace Token
+	Span          Span
+	VarTok        Token
+	InExpr        *CSTExpr
+	ParallelTok   *Token          // present when `parallel[...]` is given
+	ParallelAttrs []CSTConstEntry // bracket attrs after `parallel` (limit)
+	LBrace        Token
+	Action        *CSTAction
+	RBrace        Token
 }
 
 type CSTConstBlock struct {

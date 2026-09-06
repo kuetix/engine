@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kuetix/engine/boot"
 	"github.com/kuetix/engine/engine/domain"
@@ -18,10 +19,27 @@ type parallelTestTransition struct {
 	BaseServiceTransition
 	calls    *int64
 	failFrom int64 // branches with call ordinal > failFrom fail; 0 = never fail
+	// optional concurrency instrumentation
+	inflight *int64
+	peak     *int64
+	delay    time.Duration
 }
 
 func (p *parallelTestTransition) Do() domain.FlowStepResult {
 	n := atomic.AddInt64(p.calls, 1)
+	if p.inflight != nil {
+		cur := atomic.AddInt64(p.inflight, 1)
+		defer atomic.AddInt64(p.inflight, -1)
+		for {
+			old := atomic.LoadInt64(p.peak)
+			if cur <= old || atomic.CompareAndSwapInt64(p.peak, old, cur) {
+				break
+			}
+		}
+	}
+	if p.delay > 0 {
+		time.Sleep(p.delay)
+	}
 	if p.failFrom > 0 && n > p.failFrom {
 		return domain.FlowStepResult{Success: false, Error: errors.New("branch failed")}
 	}

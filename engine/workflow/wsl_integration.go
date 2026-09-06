@@ -190,6 +190,12 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 		if n.ForEach != nil {
 			tr["foreach_var"] = n.ForEach.Var
 			tr["foreach_list"] = n.ForEach.List.Raw
+			if n.ForEach.Parallel {
+				tr["foreach_parallel"] = true
+				if n.ForEach.ParallelLimit > 0 {
+					tr["foreach_limit"] = n.ForEach.ParallelLimit
+				}
+			}
 		}
 		if n.ContinueOnFail {
 			tr["continue_on_fail"] = true
@@ -276,6 +282,12 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 		if n.ForEach != nil {
 			tr["foreach_var"] = n.ForEach.Var
 			tr["foreach_list"] = n.ForEach.List.Raw
+			if n.ForEach.Parallel {
+				tr["foreach_parallel"] = true
+				if n.ForEach.ParallelLimit > 0 {
+					tr["foreach_limit"] = n.ForEach.ParallelLimit
+				}
+			}
 		}
 		if n.ContinueOnFail {
 			tr["continue_on_fail"] = true
@@ -350,6 +362,8 @@ var reservedTransitionKeys = map[string]struct{}{
 	"lets":             {},
 	"foreach_var":      {},
 	"foreach_list":     {},
+	"foreach_parallel": {},
+	"foreach_limit":    {},
 	"if":               {},
 	"continue_on_fail": {},
 	"skipTo":           {},

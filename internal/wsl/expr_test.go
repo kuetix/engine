@@ -252,6 +252,60 @@ workflow fe {
 	}
 }
 
+func TestForEach_ParallelParse(t *testing.T) {
+	cases := []struct {
+		src      string
+		parallel bool
+		limit    int
+	}{
+		{`foreach x in <<xs>> parallel[limit: 4] {`, true, 4},
+		{`foreach x in <<xs>> parallel {`, true, 0},
+		{`foreach x in <<xs>> {`, false, 0},
+	}
+	for _, c := range cases {
+		src := "module m\nworkflow m {\n start: S\n state S {\n  " + c.src + `
+      action a/a.Do(v: x) as r
+    }
+    on success -> Done
+    on fail -> Failed
+  }
+  state Done { end ok }
+  state Failed { end fail }
+}`
+		ast, _, err := ParseAll(src, "m")
+		if err != nil {
+			t.Fatalf("%q: %v", c.src, err)
+		}
+		fe := ast.Workflows[0].States["S"].ForEach
+		if fe == nil {
+			t.Fatalf("%q: no ForEach", c.src)
+		}
+		if fe.Parallel != c.parallel || fe.ParallelLimit != c.limit {
+			t.Errorf("%q: parallel=%v limit=%d, want %v/%d", c.src, fe.Parallel, fe.ParallelLimit, c.parallel, c.limit)
+		}
+	}
+}
+
+func TestForEach_ParallelRejectsBadLimit(t *testing.T) {
+	src := `
+module m
+workflow m {
+  start: S
+  state S {
+    foreach x in <<xs>> parallel[limit: 0] {
+      action a/a.Do(v: x) as r
+    }
+    on success -> Done
+    on fail -> Failed
+  }
+  state Done { end ok }
+  state Failed { end fail }
+}`
+	if _, _, err := ParseAll(src, "m"); err == nil {
+		t.Fatal("expected an error for parallel[limit: 0]")
+	}
+}
+
 func TestForEach_RejectMalformedCollection(t *testing.T) {
 	src := `
 module bad

@@ -2,10 +2,31 @@ package workflow
 
 import (
 	"testing"
+	"time"
 
+	di "github.com/kuetix/container"
+	"github.com/kuetix/engine/engine/defines"
 	"github.com/kuetix/engine/engine/domain"
 	"github.com/kuetix/engine/internal/wsl"
 )
+
+// registerForDI makes the test transition resolvable so parallel iterations
+// mint a fresh ServiceTransitionMapping per call (the production path), rather
+// than serialising on the shared-instance mutex.
+func registerForDI(t *testing.T, impl *parallelTestTransition) {
+	t.Helper()
+	key := defines.TransitionPrefix + "tests/parallel"
+	di.ToResolve(key, func() interface{} {
+		// Fresh Impl per resolve (mirrors production di.go), sharing the
+		// counter pointers so instrumentation still aggregates.
+		fresh := &parallelTestTransition{
+			calls: impl.calls, failFrom: impl.failFrom,
+			inflight: impl.inflight, peak: impl.peak, delay: impl.delay,
+		}
+		return ServiceTransitionMapping{ServiceName: "tests", Name: "parallel", Impl: fresh}
+	})
+	t.Cleanup(func() { delete(di.FactoryContainer, key) })
+}
 
 func foreachFlow(list string) *domain.Flow {
 	return &domain.Flow{
@@ -156,6 +177,74 @@ workflow lines {
 	}
 	if post.True != "Done#1" || post.False != "Rollback#1" {
 		t.Errorf("routing: true=%q false=%q", post.True, post.False)
+	}
+}
+
+func parallelForeachFlow(list string, limit int) *domain.Flow {
+	f := foreachFlow(list)
+	f.CurrentTransition.ForEachParallel = true
+	f.CurrentTransition.ForEachLimit = limit
+	return f
+}
+
+func TestProcessForEach_Parallel_AllSucceedOrderedResults(t *testing.T) {
+	var calls, inflight, peak int64
+	impl := &parallelTestTransition{calls: &calls, inflight: &inflight, peak: &peak, delay: 5 * time.Millisecond}
+	worker := newParallelTestWorker(t, impl)
+	registerForDI(t, impl)
+	worker.WorkflowContext.SetValue("lines", []interface{}{"a", "b", "c", "d", "e", "f"})
+
+	ok, next := worker.ProcessState(nil, parallelForeachFlow("lines", 2))
+	if !ok || next != "Done#1" {
+		t.Fatalf("ok=%v next=%q, want true/Done#1 (err %v)", ok, next, worker.GetError())
+	}
+	if calls != 6 {
+		t.Errorf("action called %d times, want 6", calls)
+	}
+	if peak > 2 {
+		t.Errorf("peak concurrency %d exceeded limit 2", peak)
+	}
+	if peak < 2 {
+		t.Errorf("peak concurrency %d, expected the two-slot pool to be used", peak)
+	}
+	wsc := &WorkerSessionContext{WorkflowContext: worker.WorkflowContext, Worker: worker, Flow: parallelForeachFlow("lines", 2), Parser: NewParser()}
+	results, isSlice := wsc.Property("posted").([]interface{})
+	if !isSlice || len(results) != 6 {
+		t.Fatalf("alias 'posted' = %#v, want 6-element slice", wsc.Property("posted"))
+	}
+}
+
+func TestProcessForEach_Parallel_Unbounded(t *testing.T) {
+	var calls, inflight, peak int64
+	impl := &parallelTestTransition{calls: &calls, inflight: &inflight, peak: &peak, delay: 5 * time.Millisecond}
+	worker := newParallelTestWorker(t, impl)
+	registerForDI(t, impl)
+	worker.WorkflowContext.SetValue("lines", []interface{}{1, 2, 3, 4})
+
+	ok, _ := worker.ProcessState(nil, parallelForeachFlow("lines", 0))
+	if !ok {
+		t.Fatalf("failed: %v", worker.GetError())
+	}
+	if peak < 2 {
+		t.Errorf("unbounded parallel: peak concurrency %d, expected overlap", peak)
+	}
+}
+
+func TestProcessForEach_Parallel_FailureTakesFailPath(t *testing.T) {
+	var calls int64
+	worker := newParallelTestWorker(t, &parallelTestTransition{calls: &calls, failFrom: 2})
+	worker.WorkflowContext.SetValue("lines", []interface{}{"a", "b", "c", "d"})
+
+	ok, next := worker.ProcessState(nil, parallelForeachFlow("lines", 4))
+	if !ok || next != "Rollback#1" {
+		t.Fatalf("ok=%v next=%q, want true/Rollback#1", ok, next)
+	}
+	// parallel runs every iteration even when some fail
+	if calls != 4 {
+		t.Errorf("action called %d times, want 4 (all iterations run)", calls)
+	}
+	if worker.GetError() == nil {
+		t.Error("expected an aggregated error")
 	}
 }
 

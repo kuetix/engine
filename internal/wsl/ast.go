@@ -51,6 +51,10 @@ type ForEach struct {
 	Var    string
 	List   *Expr
 	Action *Action
+	// Parallel runs iterations concurrently. ParallelLimit caps in-flight
+	// iterations (0 = unbounded). Sequential when Parallel is false.
+	Parallel      bool
+	ParallelLimit int
 }
 
 type State struct {

@@ -51,33 +51,35 @@ type FlowLet struct {
 }
 
 type FlowTransition struct {
-	Name           string                 `json:"name"`
-	If             *string                `json:"if,omitempty"`
-	Else           *string                `json:"else,omitempty"`
-	OnSuccessWhen  *string                `json:"on_success_when,omitempty"`
-	Guards         []FlowGuard            `json:"guards,omitempty" mapstructure:"guards,omitempty"`
-	Lets           []FlowLet              `json:"lets,omitempty" mapstructure:"lets,omitempty"`
-	ForEachVar     string                 `json:"foreach_var,omitempty" mapstructure:"foreach_var,omitempty"`
-	ForEachList    string                 `json:"foreach_list,omitempty" mapstructure:"foreach_list,omitempty"`
-	SkipTo         *bool                  `json:"skipTo,omitempty"`
-	ParallelCount  int                    `json:"parallel_count,omitempty" mapstructure:"parallel_count,omitempty"`
-	WaitJoin       string                 `json:"wait_join,omitempty" mapstructure:"wait_join,omitempty"`
-	From           []string               `json:"from,omitempty"`
-	To             string                 `json:"to"`
-	Error          string                 `json:"error,omitempty"`
-	Description    string                 `json:"description,omitempty"`
-	Roles          []string               `json:"roles"`
-	True           string                 `mapstructure:"true,omitempty"`
-	False          string                 `mapstructure:"false,omitempty"`
-	Start          bool                   `json:"start,omitempty" mapstructure:"start,omitempty"`
-	Type           string                 `json:"type,omitempty" mapstructure:"type,omitempty"`
-	FinalKind      string                 `json:"final_kind,omitempty" mapstructure:"final_kind,omitempty"`
-	ContinueOnFail bool                   `json:"continue_on_fail,omitempty"`
-	Parent         *FlowTransition        `mapstructure:"parent,omitempty"`
-	Params         map[string]interface{} `mapstructure:"params,omitempty"`
-	Response       string                 `mapstructure:"response,omitempty"`
-	Node           *wsl.Node              `mapstructure:"node,omitempty"`
-	Options        map[string]interface{} `json:"-,omitempty" mapstructure:",remain"`
+	Name            string                 `json:"name"`
+	If              *string                `json:"if,omitempty"`
+	Else            *string                `json:"else,omitempty"`
+	OnSuccessWhen   *string                `json:"on_success_when,omitempty"`
+	Guards          []FlowGuard            `json:"guards,omitempty" mapstructure:"guards,omitempty"`
+	Lets            []FlowLet              `json:"lets,omitempty" mapstructure:"lets,omitempty"`
+	ForEachVar      string                 `json:"foreach_var,omitempty" mapstructure:"foreach_var,omitempty"`
+	ForEachList     string                 `json:"foreach_list,omitempty" mapstructure:"foreach_list,omitempty"`
+	ForEachParallel bool                   `json:"foreach_parallel,omitempty" mapstructure:"foreach_parallel,omitempty"`
+	ForEachLimit    int                    `json:"foreach_limit,omitempty" mapstructure:"foreach_limit,omitempty"`
+	SkipTo          *bool                  `json:"skipTo,omitempty"`
+	ParallelCount   int                    `json:"parallel_count,omitempty" mapstructure:"parallel_count,omitempty"`
+	WaitJoin        string                 `json:"wait_join,omitempty" mapstructure:"wait_join,omitempty"`
+	From            []string               `json:"from,omitempty"`
+	To              string                 `json:"to"`
+	Error           string                 `json:"error,omitempty"`
+	Description     string                 `json:"description,omitempty"`
+	Roles           []string               `json:"roles"`
+	True            string                 `mapstructure:"true,omitempty"`
+	False           string                 `mapstructure:"false,omitempty"`
+	Start           bool                   `json:"start,omitempty" mapstructure:"start,omitempty"`
+	Type            string                 `json:"type,omitempty" mapstructure:"type,omitempty"`
+	FinalKind       string                 `json:"final_kind,omitempty" mapstructure:"final_kind,omitempty"`
+	ContinueOnFail  bool                   `json:"continue_on_fail,omitempty"`
+	Parent          *FlowTransition        `mapstructure:"parent,omitempty"`
+	Params          map[string]interface{} `mapstructure:"params,omitempty"`
+	Response        string                 `mapstructure:"response,omitempty"`
+	Node            *wsl.Node              `mapstructure:"node,omitempty"`
+	Options         map[string]interface{} `json:"-,omitempty" mapstructure:",remain"`
 }
 
 type FlowStepResult struct {

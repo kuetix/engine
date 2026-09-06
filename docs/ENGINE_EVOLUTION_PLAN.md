@@ -424,7 +424,7 @@ ABI impact: **none**.
 
 ---
 
-### Phase 3 — `foreach` (sequential) — **DONE (first cut)** · `while` — not started
+### Phase 3 — `foreach` sequential + `foreach … parallel[limit]` — **DONE (first cut)** · `while` — not started
 
 **`foreach` shipped** on `engine-evolution`. Syntax landed (slightly tighter than
 the original sketch — one action per body, no per-iteration `on` edges yet):
@@ -466,9 +466,28 @@ state PostLines {
   3-slice + `line`/`line_index` bound; empty list; iteration-failure → Rollback
   stopping after the failure; non-list errors; full WSL→schema→`CorrectFlow`
   pipeline), `engine/workflow/worker_guards_test.go` build-reject test.
+**`foreach … parallel[limit: K]` shipped** (bounded data fan-out — the Phase 4
+"shape 3"). `foreach x in <xs> parallel[limit: 4] { action ... }` runs iterations
+concurrently, at most K in flight (`parallel` with no `[limit]` = unbounded).
+
+- Grammar: optional `parallel[limit: N]` between the collection expression and
+  the `{`. `limit` must be `>= 1` (build error otherwise). CST
+  `CSTForEach.Parallel*` → AST `ForEach.Parallel`/`ParallelLimit` → schema
+  `foreach_parallel` / `foreach_limit` → `domain.FlowTransition.ForEach*`.
+- Runtime (`runForEachParallel`): each iteration runs in its own snapshot
+  context + branch worker/session (the `parallel.go` isolation pattern), with a
+  semaphore of size K. Every iteration runs to completion even when some fail
+  (no cancellation — matches existing `parallel` semantics). Ordered result
+  slice; any failure → `on fail` with an aggregated error. Fresh transition
+  instance per iteration via DI where available, else serialised on a per-loop
+  mutex.
+- Tests: `internal/wsl/expr_test.go` `TestForEach_ParallelParse` /
+  `_ParallelRejectsBadLimit`; `foreach_test.go` — ordered results with real
+  peak-concurrency == limit, unbounded shows overlap, failure → Rollback while
+  all iterations still run. Race-tested.
+
 - **Not done:** per-iteration `on success -> _ / on fail -> X` inside the body;
-  `foreach x, i in …` index-name syntax; `foreach … parallel[limit: K]`
-  (that's Phase 4); loop-var shadow lint; SWSL `foreach`.
+  `foreach x, i in …` index-name syntax; loop-var shadow lint; SWSL `foreach`.
 
 **`while <expr> max: N` — not started.** Needs the mandatory `max:` guard and
 per-iteration re-evaluation; its own increment.
@@ -524,7 +543,24 @@ ABI impact: **none** (new syntax, engine-side execution).
 
 ---
 
-### Phase 4 — generalise `parallel`
+### Phase 4 — generalise `parallel` — partly done
+
+| Shape | Status |
+|---|---|
+| 1. `parallel[count: N]` replicated fan-out | ✅ pre-existing, kept |
+| 2. heterogeneous `parallel { branch {…} branch {…} }` | **not started** |
+| 3. data fan-out `foreach x in xs parallel[limit: K]` | ✅ **done** (delivered in Phase 3) |
+
+**Rename decision (§2) — CLOSED: keep `parallel`.** The §2 analysis still holds
+(audience is business-logic authors; renaming churns every published workflow for
+a word). `foreach … parallel` reads naturally. No `concurrency` alias.
+
+Remaining Phase 4 work is shape 2 (heterogeneous fork/join) — a new block
+grammar with N independent sub-flows whose aliases merge back into the parent.
+Its own increment.
+
+<details>
+<summary>Original Phase 4 design</summary>
 
 Keep shape 1 (`parallel[count: N]`). Add:
 
@@ -566,6 +602,8 @@ ABI impact: **none**. Cancellation of in-flight branches on first failure is a
 *possible* addition but changes observable behaviour (transitions may not
 complete) — treat as a separate opt-in (`parallel[cancel_on_fail: true]`),
 discuss separately.
+
+</details>
 
 ---
 

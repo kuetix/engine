@@ -110,7 +110,16 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 					return nil, err
 				}
 				body := toAction(cs.ForEach.Action)
-				st.ForEach = &ForEach{Var: cs.ForEach.VarTok.Lexeme, List: le, Action: body}
+				fe := &ForEach{Var: cs.ForEach.VarTok.Lexeme, List: le, Action: body}
+				if cs.ForEach.ParallelTok != nil {
+					fe.Parallel = true
+					limit, err := bracketAttrInt(cs.ForEach.ParallelAttrs, "limit")
+					if err != nil {
+						return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': foreach %v", st.Name, wf.Name, err)}
+					}
+					fe.ParallelLimit = limit
+				}
+				st.ForEach = fe
 				// The body action is also the state's action so the existing
 				// arg-injection / alias / resolver handling applies unchanged.
 				st.Action = body
@@ -241,6 +250,30 @@ func parallelCount(attrs []CSTConstEntry) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("parallel state requires a 'count' attribute, e.g. parallel[count: 4]")
+}
+
+// bracketAttrInt extracts an optional positive integer attribute by name from a
+// bracket attribute list (e.g. the `limit` in `foreach x in xs parallel[limit: 4]`).
+// Returns 0 when the attribute is absent.
+func bracketAttrInt(attrs []CSTConstEntry, name string) (int, error) {
+	for _, e := range attrs {
+		if e.Key.Lexeme != name {
+			continue
+		}
+		val, err := convertConstValue(e.Val)
+		if err != nil {
+			return 0, fmt.Errorf("invalid '%s' value: %v", name, err)
+		}
+		v, ok := val.(int64)
+		if !ok {
+			return 0, fmt.Errorf("'%s' must be an integer, got %T", name, val)
+		}
+		if v < 1 {
+			return 0, fmt.Errorf("'%s' must be >= 1, got %d", name, v)
+		}
+		return int(v), nil
+	}
+	return 0, nil
 }
 
 func toAction(ca *CSTAction) *Action {

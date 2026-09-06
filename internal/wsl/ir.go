@@ -27,9 +27,11 @@ func BuildGraph(wf Workflow) *Graph {
 		}
 		if st.ForEach != nil {
 			n.ForEach = &ForEach{
-				Var:    st.ForEach.Var,
-				List:   &Expr{Raw: st.ForEach.List.Raw, Tree: st.ForEach.List.Tree},
-				Action: st.ForEach.Action,
+				Var:           st.ForEach.Var,
+				List:          &Expr{Raw: st.ForEach.List.Raw, Tree: st.ForEach.List.Tree},
+				Action:        st.ForEach.Action,
+				Parallel:      st.ForEach.Parallel,
+				ParallelLimit: st.ForEach.ParallelLimit,
 			}
 		}
 		n.ContinueOnFail = st.ContinueOnFail
