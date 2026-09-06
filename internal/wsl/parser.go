@@ -668,6 +668,15 @@ func (p *parser) parseStateAfterKeyword(stTok Token) (*CSTState, error) {
 		st.ForEach = fe
 	}
 
+	// Optional `while[max: N] <expr> { action ... }` loop body.
+	if p.cur.Kind == TokIdent && p.cur.Lexeme == "while" {
+		wl, err := p.parseWhile()
+		if err != nil {
+			return nil, err
+		}
+		st.While = wl
+	}
+
 	// optional action
 	if p.cur.Kind == TokAction {
 		act, err := p.parseAction()
@@ -1070,6 +1079,74 @@ func (p *parser) parseForEach() (*CSTForEach, error) {
 		LBrace:        lbr,
 		Action:        act,
 		RBrace:        rbr,
+	}, nil
+}
+
+// parseWhile parses `while[max: N] <expr> { action ... }`.
+func (p *parser) parseWhile() (*CSTWhile, error) {
+	start := p.cur.Pos
+	tok := p.cur
+	p.next() // consume 'while'
+	if p.cur.Kind != TokLBrack {
+		return nil, errf(p.cur.Pos, "expected '[max: N]' after 'while', here: ...%s...", p.lx.Peace(20))
+	}
+	attrs, err := p.parseOptionalBracketAttrs()
+	if err != nil {
+		return nil, err
+	}
+
+	// condition expression: raw text until '{'
+	condStartOff := p.cur.Pos.Offset
+	depthP, depthB := 0, 0
+	for p.cur.Kind != TokEOF {
+		if p.cur.Kind == TokLBrace && depthP == 0 && depthB == 0 {
+			break
+		}
+		switch p.cur.Kind {
+		case TokLParen:
+			depthP++
+		case TokRParen:
+			if depthP > 0 {
+				depthP--
+			}
+		case TokLBrack:
+			depthB++
+		case TokRBrack:
+			if depthB > 0 {
+				depthB--
+			}
+		}
+		p.next()
+	}
+	if p.cur.Kind != TokLBrace {
+		return nil, errf(p.cur.Pos, "expected '{' to open the 'while' body, here: ...%s...", p.lx.Peace(20))
+	}
+	rawCond := strings.TrimSpace(p.lx.src[condStartOff:p.cur.Pos.Offset])
+	if rawCond == "" {
+		return nil, errf(p.cur.Pos, "empty 'while' condition expression, here: ...%s...", p.lx.Peace(20))
+	}
+	lbr := p.cur
+	p.next() // consume '{'
+
+	if p.cur.Kind != TokAction {
+		return nil, errf(p.cur.Pos, "'while' body must contain a single 'action', here: ...%s...", p.lx.Peace(20))
+	}
+	act, err := p.parseAction()
+	if err != nil {
+		return nil, err
+	}
+	rbr, err := p.expect(TokRBrace)
+	if err != nil {
+		return nil, errf(p.cur.Pos, "expected '}' to close the 'while' body (only one action is allowed), here: ...%s...", p.lx.Peace(20))
+	}
+	return &CSTWhile{
+		Span:     Span{Start: start, End: rbr.Pos},
+		Tok:      tok,
+		Attrs:    attrs,
+		CondExpr: &CSTExpr{Raw: rawCond, Span: Span{Start: start, End: lbr.Pos}},
+		LBrace:   lbr,
+		Action:   act,
+		RBrace:   rbr,
 	}, nil
 }
 

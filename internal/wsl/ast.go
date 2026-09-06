@@ -57,6 +57,14 @@ type RetryPolicy struct {
 	On    *Expr
 }
 
+// WhileLoop re-runs a state's action while Cond is truthy, at most Max times.
+// Reaching Max with Cond still truthy takes the state's `on fail` path.
+type WhileLoop struct {
+	Max    int
+	Cond   *Expr
+	Action *Action
+}
+
 type ForEach struct {
 	Var    string
 	List   *Expr
@@ -74,6 +82,7 @@ type State struct {
 	Transitions    []Transition
 	Lets           []LetBinding
 	ForEach        *ForEach
+	While          *WhileLoop
 	Retry          *RetryPolicy
 	Start          bool
 	End            *End
@@ -165,6 +174,7 @@ type Node struct {
 	IfExpr         *Expr             // optional if condition expression
 	Lets           []LetBinding      // let bindings evaluated on state entry
 	ForEach        *ForEach          // optional foreach loop body
+	While          *WhileLoop        // optional while loop body
 	Retry          *RetryPolicy      // optional retry policy for the action
 	ContinueOnFail bool              // continue on fail flag
 	SkipTo         bool              // skip to flag

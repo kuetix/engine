@@ -135,6 +135,29 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 				// arg-injection / alias / resolver handling applies unchanged.
 				st.Action = body
 			}
+			if cs.While != nil {
+				if cs.Action != nil || cs.ForEach != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': 'while' cannot be combined with a top-level 'action' or 'foreach'", st.Name, wf.Name)}
+				}
+				if cs.Retry != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': 'retry' is not supported on a 'while' state yet", st.Name, wf.Name)}
+				}
+				ctx := fmt.Sprintf("'while' in state '%s' of workflow '%s'", st.Name, wf.Name)
+				max, err := bracketAttrInt(cs.While.Attrs, "max")
+				if err != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("%s: %v", ctx, err)}
+				}
+				if max < 1 {
+					return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'max' is required and must be >= 1, e.g. while[max: 500]", ctx)}
+				}
+				ce, err := parseValidatedExpr(cs.While.CondExpr.Raw, ctx+" condition")
+				if err != nil {
+					return nil, err
+				}
+				body := toAction(cs.While.Action)
+				st.While = &WhileLoop{Max: max, Cond: ce, Action: body}
+				st.Action = body
+			}
 			for _, ct := range cs.Transitions {
 				cond := toCondition(ct.Cond)
 				target := ct.TargetTok.Lexeme

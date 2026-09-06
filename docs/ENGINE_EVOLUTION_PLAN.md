@@ -424,7 +424,7 @@ ABI impact: **none**.
 
 ---
 
-### Phase 3 — `foreach` sequential + `foreach … parallel[limit]` — **DONE (first cut)** · `while` — not started
+### Phase 3 — `foreach` (+ `parallel[limit]`) and `while` — **DONE (first cut)**
 
 **`foreach` shipped** on `engine-evolution`. Syntax landed (slightly tighter than
 the original sketch — one action per body, no per-iteration `on` edges yet):
@@ -489,8 +489,32 @@ concurrently, at most K in flight (`parallel` with no `[limit]` = unbounded).
 - **Not done:** per-iteration `on success -> _ / on fail -> X` inside the body;
   `foreach x, i in …` index-name syntax; loop-var shadow lint; SWSL `foreach`.
 
-**`while <expr> max: N` — not started.** Needs the mandatory `max:` guard and
-per-iteration re-evaluation; its own increment.
+**`while[max: N] <expr> { action ... }` shipped.**
+
+```wsl
+state Drain {
+  while[max: 500] <<queue.size>> > 0 {
+    action queue/queue.Pop() as item
+  }
+  on success -> Done
+  on fail -> Failed
+}
+```
+
+- Grammar: `while[max: N] <expr> { action }` in the state body. `max` is
+  **mandatory** (`>= 1`) — no unbounded `while`. Bracket-attr form (`while[...]`)
+  keeps the condition scan unambiguous. Mutually exclusive with a top-level
+  `action` / `foreach`; `retry` on a `while` state is rejected.
+- Runtime (`engine/workflow/while.go` `processWhile`): re-evaluates the
+  condition (with `while_index` bound) before each iteration; truthy → run the
+  body action, falsy → `on success`. Action failure → `on fail`. `max`
+  iterations reached with the condition still truthy → `on fail` with a "reached
+  max iterations" error. Bounded by `max` + the `MaxSteps` guard.
+- Tests: `internal/wsl/expr_test.go` `TestWhile_Parse`;
+  `engine/workflow/while_test.go` — runs until `while_index < 3` goes false (3
+  calls), condition false immediately (0 calls), reaches max → Failed,
+  action-failure → Failed, full pipeline, build-validation matrix.
+- **Not done:** `on max -> State` escape hatch; SWSL `while`.
 
 <details>
 <summary>Original Phase 3 design</summary>

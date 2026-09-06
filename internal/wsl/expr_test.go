@@ -327,6 +327,40 @@ workflow bad {
 	}
 }
 
+func TestWhile_Parse(t *testing.T) {
+	src := `
+module m
+workflow m {
+  start: S
+  state S {
+    while[max: 500] <<queue.size>> > 0 {
+      action queue/queue.Pop() as item
+    }
+    on success -> Done
+    on fail -> Failed
+  }
+  state Done { end ok }
+  state Failed { end fail }
+}`
+	ast, _, err := ParseAll(src, "m")
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+	wl := ast.Workflows[0].States["S"].While
+	if wl == nil {
+		t.Fatal("expected a while loop")
+	}
+	if wl.Max != 500 {
+		t.Errorf("max = %d, want 500", wl.Max)
+	}
+	if wl.Cond == nil || wl.Cond.Tree == nil {
+		t.Error("expected the condition to be parsed")
+	}
+	if wl.Action == nil || wl.Action.Name != "Pop" {
+		t.Errorf("body action = %+v", wl.Action)
+	}
+}
+
 func TestRetry_Parse(t *testing.T) {
 	src := `
 module m

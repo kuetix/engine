@@ -67,6 +67,7 @@ type CSTState struct {
 	IfExpr         *CSTExpr    // if condition expression
 	Lets           []CSTLet    // 'let name = <expr>' bindings, in source order
 	ForEach        *CSTForEach // 'foreach x in <expr> { action ... }' loop body
+	While          *CSTWhile   // 'while[max: N] <expr> { action ... }' loop body
 	Retry          *CSTRetry   // 'retry[max: N, delay: "..", on: ".."]' policy
 	ContinueOnFail bool        // 'continue on fail' flag
 	SkipTo         bool        // 'skip to' flag
@@ -140,6 +141,17 @@ type CSTLet struct {
 	Span    Span
 	NameTok Token
 	Val     *CSTExpr
+}
+
+// CSTWhile is a `while[max: N] <expr> { action ... }` loop body.
+type CSTWhile struct {
+	Span     Span
+	Tok      Token
+	Attrs    []CSTConstEntry // bracket attrs after `while` (max, required)
+	CondExpr *CSTExpr
+	LBrace   Token
+	Action   *CSTAction
+	RBrace   Token
 }
 
 // CSTRetry is a `retry[max: N, delay: "..", on: ".."]` state attribute.

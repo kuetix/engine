@@ -173,9 +173,12 @@ func (baseWorker *workflowWorker) ProcessState(w EngineInterface, flow *domain.F
 		}
 	}
 
-	// `foreach` states loop the action over a collection; handled by the engine.
+	// `foreach` / `while` states loop the action; handled by the engine.
 	if flow.CurrentTransition != nil && flow.CurrentTransition.ForEachList != "" {
 		return baseWorker.processForEach(&workerSessionContext)
+	}
+	if flow.CurrentTransition != nil && flow.CurrentTransition.WhileCond != "" {
+		return baseWorker.processWhile(&workerSessionContext)
 	}
 
 	// Bind call arguments to target state parameters (if provided)

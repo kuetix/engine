@@ -187,6 +187,10 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 			}
 			tr["lets"] = lets
 		}
+		if n.While != nil {
+			tr["while_max"] = n.While.Max
+			tr["while_cond"] = n.While.Cond.Raw
+		}
 		if n.Retry != nil {
 			retry := map[string]interface{}{"max": n.Retry.Max}
 			if n.Retry.Delay != "" {
@@ -289,6 +293,10 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 			}
 			tr["lets"] = lets
 		}
+		if n.While != nil {
+			tr["while_max"] = n.While.Max
+			tr["while_cond"] = n.While.Cond.Raw
+		}
 		if n.Retry != nil {
 			retry := map[string]interface{}{"max": n.Retry.Max}
 			if n.Retry.Delay != "" {
@@ -384,6 +392,8 @@ var reservedTransitionKeys = map[string]struct{}{
 	"foreach_list":     {},
 	"foreach_parallel": {},
 	"foreach_limit":    {},
+	"while_max":        {},
+	"while_cond":       {},
 	"retry":            {},
 	"if":               {},
 	"continue_on_fail": {},

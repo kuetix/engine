@@ -70,6 +70,8 @@ type FlowTransition struct {
 	ForEachList     string                 `json:"foreach_list,omitempty" mapstructure:"foreach_list,omitempty"`
 	ForEachParallel bool                   `json:"foreach_parallel,omitempty" mapstructure:"foreach_parallel,omitempty"`
 	ForEachLimit    int                    `json:"foreach_limit,omitempty" mapstructure:"foreach_limit,omitempty"`
+	WhileMax        int                    `json:"while_max,omitempty" mapstructure:"while_max,omitempty"`
+	WhileCond       string                 `json:"while_cond,omitempty" mapstructure:"while_cond,omitempty"`
 	Retry           *FlowRetry             `json:"retry,omitempty" mapstructure:"retry,omitempty"`
 	SkipTo          *bool                  `json:"skipTo,omitempty"`
 	ParallelCount   int                    `json:"parallel_count,omitempty" mapstructure:"parallel_count,omitempty"`
