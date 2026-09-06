@@ -65,6 +65,7 @@ type CSTState struct {
 	// Optional state attributes
 	IfTok          *Token   // 'if' keyword
 	IfExpr         *CSTExpr // if condition expression
+	Lets           []CSTLet // 'let name = <expr>' bindings, in source order
 	ContinueOnFail bool     // 'continue on fail' flag
 	SkipTo         bool     // 'skip to' flag
 	// Parallel fork state: parallel[count: N] Name { ... }
@@ -130,6 +131,13 @@ type CSTExpr struct {
 	// For MVP we keep raw string of expression text and span
 	Raw  string
 	Span Span
+}
+
+// CSTLet is a `let <name> = <expr>` binding in a state body.
+type CSTLet struct {
+	Span    Span
+	NameTok Token
+	Val     *CSTExpr
 }
 
 type CSTConstBlock struct {

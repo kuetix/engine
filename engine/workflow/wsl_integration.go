@@ -92,8 +92,9 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 	// Build transitions: one per node (state) so that branching (true/false/else) is set
 	transitions := make([]map[string]interface{}, 0, len(g.Nodes))
 
-	// helper to map outgoing edges of a node to True/False/Else/OnSuccessWhen
-	edgeMap := func(n *wsl.Node) (trueNext, falseNext string, elseNext *string, onSuccessWhen *string) {
+	// helper to map outgoing edges of a node to True/False/Else and the ordered
+	// list of `on success when` guards.
+	edgeMap := func(n *wsl.Node) (trueNext, falseNext string, elseNext *string, onSuccessWhen *string, guards []map[string]interface{}) {
 		var tNext string
 		var fNext string
 		var eNext *string
@@ -101,21 +102,16 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 		for _, e := range n.Edges {
 			switch e.Condition.Kind {
 			case wsl.CondSuccess:
-				// Check if this success edge has a when expression
 				if e.WhenExpr != nil && e.WhenExpr.Raw != "" {
-					// This is "on success when <condition>" - map to on_success_when
-					if oswExpr == nil {
-						// Use the first on_success_when condition found
-						oswExpr = &e.WhenExpr.Raw
-						// The target becomes the True path
-						if tNext == "" {
-							tNext = stateName(nodeByName, e.To)
-						}
-					}
-					// Note: Multiple "on success when" conditions in WSL will need
-					// to be evaluated sequentially. For now, we capture the first one.
+					// `on success when <expr> -> <to>`: an ordered guard. All
+					// such edges are kept; the worker evaluates them in order
+					// and takes the first whose expression is truthy.
+					guards = append(guards, map[string]interface{}{
+						"when": e.WhenExpr.Raw,
+						"to":   stateName(nodeByName, e.To),
+					})
 				} else {
-					// Regular "on success" without condition
+					// unguarded `on success`: the fallback / else for the guards
 					if tNext == "" {
 						tNext = stateName(nodeByName, e.To)
 					}
@@ -135,19 +131,30 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 				}
 			}
 		}
-		return tNext, fNext, eNext, oswExpr
+		// Back-compat: a single guard with no unguarded `on success` also
+		// populates on_success_when so hand-written JSON flows keep working.
+		if len(guards) == 1 && tNext == "" {
+			w := guards[0]["when"].(string)
+			oswExpr = &w
+			tNext = guards[0]["to"].(string)
+			guards = nil
+		}
+		return tNext, fNext, eNext, oswExpr, guards
 	}
 
 	// Ensure there is a synthetic first transition from "_" into start
 	if node, ok := g.Nodes[g.Start]; ok {
 		toName := stateName(nodeByName, g.Start)
 		n := g.Nodes[g.Start]
-		tNext, fNext, eNext, oswExpr := edgeMap(n)
+		tNext, fNext, eNext, oswExpr, guards := edgeMap(n)
 		tr := map[string]interface{}{
 			"name": node.Name,
 			"to":   toName,
 			"from": []string{"_"},
 			"node": n,
+		}
+		if len(guards) > 0 {
+			tr["guards"] = guards
 		}
 		// attach constants to transition options if present
 		if g.Constants != nil && len(g.Constants) > 0 {
@@ -172,6 +179,13 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 		// Add node-level attributes to transition
 		if n.IfExpr != nil {
 			tr["if"] = n.IfExpr.Raw
+		}
+		if len(n.Lets) > 0 {
+			lets := make([]map[string]interface{}, 0, len(n.Lets))
+			for _, lb := range n.Lets {
+				lets = append(lets, map[string]interface{}{"name": lb.Name, "expr": lb.Expr.Raw})
+			}
+			tr["lets"] = lets
 		}
 		if n.ContinueOnFail {
 			tr["continue_on_fail"] = true
@@ -222,12 +236,15 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 			// default from previous (engine will fix), but keep empty slice to avoid nil so CorrectFlow won't auto-wire wrong
 			fromList = []string{"_"}
 		}
-		tNext, fNext, eNext, oswExpr := edgeMap(n)
+		tNext, fNext, eNext, oswExpr, guards := edgeMap(n)
 		tr := map[string]interface{}{
 			"name": name,
 			"to":   toName,
 			"from": fromList,
 			"node": n,
+		}
+		if len(guards) > 0 {
+			tr["guards"] = guards
 		}
 		if tNext != "" {
 			tr["true"] = tNext
@@ -244,6 +261,13 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 		// Add node-level attributes to transition
 		if n.IfExpr != nil {
 			tr["if"] = n.IfExpr.Raw
+		}
+		if len(n.Lets) > 0 {
+			lets := make([]map[string]interface{}, 0, len(n.Lets))
+			for _, lb := range n.Lets {
+				lets = append(lets, map[string]interface{}{"name": lb.Name, "expr": lb.Expr.Raw})
+			}
+			tr["lets"] = lets
 		}
 		if n.ContinueOnFail {
 			tr["continue_on_fail"] = true
@@ -314,6 +338,8 @@ var reservedTransitionKeys = map[string]struct{}{
 	"false":            {},
 	"else":             {},
 	"on_success_when":  {},
+	"guards":           {},
+	"lets":             {},
 	"if":               {},
 	"continue_on_fail": {},
 	"skipTo":           {},

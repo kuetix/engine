@@ -34,11 +34,29 @@ type FlowState struct {
 	Options        map[string]interface{} `json:"-,omitempty" mapstructure:",remain"`
 }
 
+// FlowGuard is one `on success when <expr> -> <to>` branch. A transition may
+// carry several; they are evaluated in source order and the first whose
+// expression is truthy wins. If none match, the transition's True path (the
+// unguarded `on success`, if any) is taken.
+type FlowGuard struct {
+	When string `json:"when,omitempty" mapstructure:"when,omitempty"`
+	To   string `json:"to,omitempty" mapstructure:"to,omitempty"`
+}
+
+// FlowLet is a `let name = <expr>` binding evaluated on state entry, before the
+// state's `if`, arguments, and action.
+type FlowLet struct {
+	Name string `json:"name,omitempty" mapstructure:"name,omitempty"`
+	Expr string `json:"expr,omitempty" mapstructure:"expr,omitempty"`
+}
+
 type FlowTransition struct {
 	Name           string                 `json:"name"`
 	If             *string                `json:"if,omitempty"`
 	Else           *string                `json:"else,omitempty"`
 	OnSuccessWhen  *string                `json:"on_success_when,omitempty"`
+	Guards         []FlowGuard            `json:"guards,omitempty" mapstructure:"guards,omitempty"`
+	Lets           []FlowLet              `json:"lets,omitempty" mapstructure:"lets,omitempty"`
 	SkipTo         *bool                  `json:"skipTo,omitempty"`
 	ParallelCount  int                    `json:"parallel_count,omitempty" mapstructure:"parallel_count,omitempty"`
 	WaitJoin       string                 `json:"wait_join,omitempty" mapstructure:"wait_join,omitempty"`

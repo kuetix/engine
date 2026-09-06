@@ -20,7 +20,10 @@ func BuildGraph(wf Workflow) *Graph {
 		}
 		// Copy new state attributes
 		if st.IfExpr != nil {
-			n.IfExpr = &Expr{Raw: st.IfExpr.Raw}
+			n.IfExpr = &Expr{Raw: st.IfExpr.Raw, Tree: st.IfExpr.Tree}
+		}
+		for _, lb := range st.Lets {
+			n.Lets = append(n.Lets, LetBinding{Name: lb.Name, Expr: &Expr{Raw: lb.Expr.Raw, Tree: lb.Expr.Tree}})
 		}
 		n.ContinueOnFail = st.ContinueOnFail
 		n.SkipTo = st.SkipTo
@@ -43,7 +46,7 @@ func BuildGraph(wf Workflow) *Graph {
 				n.Start = true
 			}
 			if tr.WhenExpr != nil {
-				edge.WhenExpr = &Expr{Raw: tr.WhenExpr.Raw}
+				edge.WhenExpr = &Expr{Raw: tr.WhenExpr.Raw, Tree: tr.WhenExpr.Tree}
 			}
 			if len(tr.Args) > 0 {
 				edge.Args = append(edge.Args, tr.Args...)

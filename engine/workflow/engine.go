@@ -23,6 +23,21 @@ import (
 
 const LimitTrace = 20
 
+// Execution guards. A WSL workflow can revisit states (a transition may route
+// back to an earlier state), and the language has no loop construct with a
+// built-in bound, so the run loop needs a backstop against workflows that never
+// reach a terminal state. These are deliberately generous: a legitimate
+// deep-composition workflow should never come close. They are package
+// variables (not constants) so a config profile can tune them.
+var (
+	// MaxSteps caps the total number of state transitions in a single run.
+	MaxSteps = 10000
+	// MaxStateVisits caps how many times any one state may be entered in a
+	// single run. Catches tight self-loops earlier (and with a clearer
+	// message) than MaxSteps would.
+	MaxStateVisits = 1000
+)
+
 type EngineInterface interface {
 	LoadWorkflow(c context.Context, configName string, worker Worker) bool
 	Start() bool
@@ -613,6 +628,16 @@ func (w *Engine) CorrectFlow(flow *domain.Flow) error {
 				*transition.Else = fmt.Sprintf("%s#%d", *transition.Else, 1)
 			}
 		}
+		for gi := range transition.Guards {
+			target := transition.Guards[gi].To
+			if target == "" || target == "_" {
+				continue
+			}
+			if strings.ContainsRune(target, '#') == false {
+				target = fmt.Sprintf("%s#%d", target, 1)
+			}
+			transition.Guards[gi].To = target
+		}
 		lastTransition = transition
 		statesExists[transition.To] = false
 		statesExistsSorted = append(statesExistsSorted, transition.To)
@@ -848,9 +873,31 @@ func (w *Engine) Run() bool {
 	var customNextStepName = ""
 	w.Worker.PrepareContext(w.Engine, w.Flow)
 	var previous = "_"
+	steps := 0
+	stateVisits := map[string]int{}
 	for w.can(customNextStepName) {
 		w.next(customNextStepName)
 		customNextStepName = ""
+
+		// Execution guards: abort a run that never reaches a terminal state
+		// instead of looping forever.
+		steps++
+		if steps > MaxSteps {
+			msg := fmt.Sprintf("In %s: %s: workflow exceeded the step budget (%d transitions) without reaching a terminal state; last state %s, trace: %s",
+				w.Name, w.WorkflowName, MaxSteps, w.Flow.CurrentState.State, w.Flow.GetTraceString())
+			w.Worker.SetError(issues.NewIssue(msg, errors.New(msg)), http.StatusInternalServerError)
+			return false
+		}
+		if (*w.Flow).CurrentTransition != nil {
+			visited := (*w.Flow).CurrentTransition.To
+			stateVisits[visited]++
+			if stateVisits[visited] > MaxStateVisits {
+				msg := fmt.Sprintf("In %s: %s: possible infinite loop: state %s entered more than %d times in one run, trace: %s",
+					w.Name, w.WorkflowName, visited, MaxStateVisits, w.Flow.GetTraceString())
+				w.Worker.SetError(issues.NewIssue(msg, errors.New(msg)), http.StatusInternalServerError)
+				return false
+			}
+		}
 
 		// Trace
 		if (*w.Flow).CurrentTransition != nil {

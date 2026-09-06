@@ -74,8 +74,8 @@ workflow test_when {
 	}
 	if tr1.Cond.WhenExpr == nil {
 		t.Error("transition 1: expected when expression, got nil")
-	} else if tr1.Cond.WhenExpr.Raw != `$constants.version = = "1.0.0"` {
-		t.Errorf("transition 1: expected when expression '$constants.version = = \"1.0.0\"', got '%s'", tr1.Cond.WhenExpr.Raw)
+	} else if tr1.Cond.WhenExpr.Raw != `$constants.version == "1.0.0"` {
+		t.Errorf("transition 1: expected when expression '$constants.version == \"1.0.0\"', got '%s'", tr1.Cond.WhenExpr.Raw)
 	}
 	if tr1.TargetTok.Lexeme != "VersionOne" {
 		t.Errorf("transition 1: expected target 'VersionOne', got '%s'", tr1.TargetTok.Lexeme)
@@ -88,8 +88,8 @@ workflow test_when {
 	}
 	if tr2.Cond.WhenExpr == nil {
 		t.Error("transition 2: expected when expression, got nil")
-	} else if tr2.Cond.WhenExpr.Raw != `$constants.version = = "2.0.0"` {
-		t.Errorf("transition 2: expected when expression '$constants.version = = \"2.0.0\"', got '%s'", tr2.Cond.WhenExpr.Raw)
+	} else if tr2.Cond.WhenExpr.Raw != `$constants.version == "2.0.0"` {
+		t.Errorf("transition 2: expected when expression '$constants.version == \"2.0.0\"', got '%s'", tr2.Cond.WhenExpr.Raw)
 	}
 
 	// Check third transition: on success -> Default (no when)
@@ -136,8 +136,8 @@ workflow test_when {
 	astTr1 := checkStateAST.Transitions[0]
 	if astTr1.WhenExpr == nil {
 		t.Error("AST transition 1: expected when expression, got nil")
-	} else if astTr1.WhenExpr.Raw != `$constants.version = = "1.0.0"` {
-		t.Errorf("AST transition 1: expected when expression '$constants.version = = \"1.0.0\"', got '%s'", astTr1.WhenExpr.Raw)
+	} else if astTr1.WhenExpr.Raw != `$constants.version == "1.0.0"` {
+		t.Errorf("AST transition 1: expected when expression '$constants.version == \"1.0.0\"', got '%s'", astTr1.WhenExpr.Raw)
 	}
 
 	astTr3 := checkStateAST.Transitions[2]
@@ -164,8 +164,8 @@ workflow test_when {
 	edge1 := checkNode.Edges[0]
 	if edge1.WhenExpr == nil {
 		t.Error("Graph edge 1: expected when expression, got nil")
-	} else if edge1.WhenExpr.Raw != `$constants.version = = "1.0.0"` {
-		t.Errorf("Graph edge 1: expected when expression '$constants.version = = \"1.0.0\"', got '%s'", edge1.WhenExpr.Raw)
+	} else if edge1.WhenExpr.Raw != `$constants.version == "1.0.0"` {
+		t.Errorf("Graph edge 1: expected when expression '$constants.version == \"1.0.0\"', got '%s'", edge1.WhenExpr.Raw)
 	}
 
 	edge3 := checkNode.Edges[2]

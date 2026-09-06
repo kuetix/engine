@@ -1,5 +1,7 @@
 package wsl
 
+import "fmt"
+
 // AST semantic model
 
 type Module struct {
@@ -33,11 +35,19 @@ type Workflow struct {
 	States map[string]*State
 }
 
+// LetBinding is a `let name = <expr>` binding evaluated (in order) when the
+// state is entered, before its `if`, arguments, and action.
+type LetBinding struct {
+	Name string
+	Expr *Expr
+}
+
 type State struct {
 	Name           string
 	Params         []string
 	Action         *Action
 	Transitions    []Transition
+	Lets           []LetBinding
 	Start          bool
 	End            *End
 	IfExpr         *Expr // optional if condition expression
@@ -85,10 +95,25 @@ type Condition struct {
 	Expr *Expr  // present if Kind==CondExpr
 }
 
-// Expr is a minimally structured expression for MVP.
-// We keep tokens-as-text joined, optionally with a parsed identifier literal.
+// Expr carries the raw text of a WSL expression and, when it has been parsed,
+// its typed tree (see expr.go). Tree is nil for expressions that are not parsed
+// at build time (e.g. action arguments, which may be `key: value` pairs).
 type Expr struct {
-	Raw string
+	Raw  string
+	Tree ExprNode
+}
+
+// parseValidatedExpr parses raw expression text and returns a *Expr carrying
+// both the text and the tree. A parse failure is a SemanticError naming the
+// context (e.g. "when condition in state 'X'").
+func parseValidatedExpr(raw, context string) (*Expr, error) {
+	e := &Expr{Raw: raw}
+	tree, err := ParseExpr(raw)
+	if err != nil {
+		return nil, &SemanticError{Msg: fmt.Sprintf("%s: %v", context, err)}
+	}
+	e.Tree = tree
+	return e, nil
 }
 
 // IR Graph for visualization/runtime
@@ -111,6 +136,7 @@ type Node struct {
 	TerminalKind   string            // ok|fail
 	Attr           map[string]string // for end nodes
 	IfExpr         *Expr             // optional if condition expression
+	Lets           []LetBinding      // let bindings evaluated on state entry
 	ContinueOnFail bool              // continue on fail flag
 	SkipTo         bool              // skip to flag
 	// Parallel fork/join

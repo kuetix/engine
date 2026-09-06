@@ -585,6 +585,23 @@ func (p *parser) parseStateAfterKeyword(stTok Token) (*CSTState, error) {
 		}
 		st.IfExpr = ifExpr
 	}
+	// Zero or more `let <name> = <expr>` bindings.
+	for p.cur.Kind == TokIdent && p.cur.Lexeme == "let" {
+		letStart := p.cur.Pos
+		p.next()
+		nameTok, err := p.expect(TokIdent)
+		if err != nil {
+			return nil, errf(p.cur.Pos, "expected a name after 'let', got %s, here: ...%s...", p.cur.Kind, p.lx.Peace(20))
+		}
+		if _, err := p.expect(TokEqual); err != nil {
+			return nil, errf(p.cur.Pos, "expected '=' after 'let %s', got %s, here: ...%s...", nameTok.Lexeme, p.cur.Kind, p.lx.Peace(20))
+		}
+		val, err := p.parseLetValueExpr()
+		if err != nil {
+			return nil, err
+		}
+		st.Lets = append(st.Lets, CSTLet{Span: Span{Start: letStart, End: p.cur.Pos}, NameTok: nameTok, Val: val})
+	}
 	// Check for 'continue on fail'
 	if p.cur.Kind == TokContinue {
 		p.next()
@@ -925,6 +942,54 @@ func (p *parser) parseExprUntilCommaOrParen() (*CSTExpr, error) {
 		}
 		raw += tokenLexeme(p.cur)
 		p.next()
+	}
+	return &CSTExpr{Raw: raw, Span: Span{Start: start, End: p.cur.Pos}}, nil
+}
+
+// parseLetValueExpr captures the raw source text of a `let` binding's value,
+// stopping at the next statement in the state body. It slices the source
+// directly (rather than re-serialising tokens) so arithmetic operators the
+// WSL lexer does not tokenise (`* + %`) survive into the expression string,
+// where the expression parser handles them.
+func (p *parser) parseLetValueExpr() (*CSTExpr, error) {
+	start := p.cur.Pos
+	startOff := p.cur.Pos.Offset
+	parenDepth, brackDepth, braceDepth := 0, 0, 0
+	for p.cur.Kind != TokEOF {
+		if parenDepth == 0 && brackDepth == 0 && braceDepth == 0 {
+			if p.cur.Kind == TokAction || p.cur.Kind == TokOn || p.cur.Kind == TokEnd ||
+				p.cur.Kind == TokContinue || p.cur.Kind == TokSkip || p.cur.Kind == TokIf ||
+				p.cur.Kind == TokRBrace || (p.cur.Kind == TokIdent && p.cur.Lexeme == "let") {
+				break
+			}
+		}
+		switch p.cur.Kind {
+		case TokLParen:
+			parenDepth++
+		case TokRParen:
+			if parenDepth > 0 {
+				parenDepth--
+			}
+		case TokLBrack:
+			brackDepth++
+		case TokRBrack:
+			if brackDepth > 0 {
+				brackDepth--
+			}
+		case TokLBrace:
+			braceDepth++
+		case TokRBrace:
+			braceDepth--
+		}
+		p.next()
+	}
+	endOff := p.cur.Pos.Offset
+	if p.cur.Kind == TokEOF || endOff < startOff || endOff > len(p.lx.src) {
+		endOff = len(p.lx.src)
+	}
+	raw := strings.TrimSpace(p.lx.src[startOff:endOff])
+	if raw == "" {
+		return nil, errf(p.cur.Pos, "empty 'let' value, expected an expression, here: ...%s...", p.lx.Peace(20))
 	}
 	return &CSTExpr{Raw: raw, Span: Span{Start: start, End: p.cur.Pos}}, nil
 }

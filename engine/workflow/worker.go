@@ -153,6 +153,7 @@ func (baseWorker *workflowWorker) ProcessState(w EngineInterface, flow *domain.F
 		Worker:          baseWorker,
 		Flow:            flow,
 		Engine:          w,
+		Parser:          NewParser(),
 	}
 
 	// Parallel fork/join states are handled by the engine itself, not by a
@@ -163,6 +164,13 @@ func (baseWorker *workflowWorker) ProcessState(w EngineInterface, flow *domain.F
 		}
 		if flow.CurrentTransition.WaitJoin != "" {
 			return baseWorker.processParallelWait(&workerSessionContext)
+		}
+	}
+
+	// Evaluate `let` bindings before if / args / action / when.
+	if err := applyLetBindings(&workerSessionContext); err != nil {
+		if !workerSessionContext.Worker.HandleError(err, http.StatusInternalServerError) {
+			return false, ""
 		}
 	}
 
@@ -257,11 +265,11 @@ func (baseWorker *workflowWorker) ProcessState(w EngineInterface, flow *domain.F
 
 	if flow.CurrentTransition.If != nil {
 		conditionProp := *flow.CurrentTransition.If
-		condition, err := workerSessionContext.Parser.ParseTemplate(conditionProp)
-		if !workerSessionContext.Worker.HandleError(err, http.StatusInternalServerError) {
+		pass := evaluateTransitionCondition(conditionProp, &workerSessionContext)
+		if pass == nil {
 			return false, ""
 		}
-		if condition == "false" {
+		if !*pass {
 			if flow.CurrentTransition.Else != nil {
 				elseConditionProp := *flow.CurrentTransition.Else
 				elseCondition, err := workerSessionContext.Parser.ParseTemplate(elseConditionProp)
@@ -481,16 +489,37 @@ func (baseWorker *workflowWorker) ProcessState(w EngineInterface, flow *domain.F
 		}
 
 		if isDone {
-			// Check OnSuccessWhen condition if present
-			if flow.CurrentTransition.OnSuccessWhen != nil {
+			// `on success when <expr>` guards: evaluate in source order, first
+			// truthy wins. An unguarded `on success` (True) is the fallback.
+			if len(flow.CurrentTransition.Guards) > 0 {
+				matched := ""
+				for _, guard := range flow.CurrentTransition.Guards {
+					pass := evaluateTransitionCondition(guard.When, &workerSessionContext)
+					if pass == nil {
+						return false, ""
+					}
+					if *pass {
+						matched = guard.To
+						break
+					}
+				}
+				if matched != "" {
+					nextStateNameOrError = matched
+				} else if flow.CurrentTransition.True != "" {
+					nextStateNameOrError = flow.CurrentTransition.True
+				} else if flow.CurrentTransition.False != "" {
+					nextStateNameOrError = flow.CurrentTransition.False
+				} else {
+					// no guard matched and no fallback: fail closed
+					isDone = false
+				}
+			} else if flow.CurrentTransition.OnSuccessWhen != nil {
 				conditionProp := *flow.CurrentTransition.OnSuccessWhen
-				condition, err := workerSessionContext.Parser.ParseTemplate(conditionProp)
-				if !workerSessionContext.Worker.HandleError(err, http.StatusInternalServerError) {
+				pass := evaluateTransitionCondition(conditionProp, &workerSessionContext)
+				if pass == nil {
 					return false, ""
 				}
-				// Evaluate the condition - only "false" (as string) means condition failed
-				// This matches the behavior of the existing If condition evaluation (line 230)
-				if condition == "false" {
+				if !*pass {
 					// Condition failed, route to False path
 					if flow.CurrentTransition.False != "" {
 						nextStateNameOrError = flow.CurrentTransition.False

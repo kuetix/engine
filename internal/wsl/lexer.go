@@ -146,6 +146,30 @@ func (lx *Lexer) Next() Token {
 		return Token{Kind: TokLeftArrow, Lexeme: "<-", Pos: pos}
 	}
 
+	// Two-character comparison and logical operators. Checked before the
+	// single-character switch so '==' does not lex as two '=' tokens, etc.
+	// '->' and '<-' are already handled above.
+	switch lx.peekString(2) {
+	case "==":
+		lx.advance(2)
+		return Token{Kind: TokEqEq, Lexeme: "==", Pos: pos}
+	case "!=":
+		lx.advance(2)
+		return Token{Kind: TokNeq, Lexeme: "!=", Pos: pos}
+	case ">=":
+		lx.advance(2)
+		return Token{Kind: TokGte, Lexeme: ">=", Pos: pos}
+	case "<=":
+		lx.advance(2)
+		return Token{Kind: TokLte, Lexeme: "<=", Pos: pos}
+	case "&&":
+		lx.advance(2)
+		return Token{Kind: TokAndAnd, Lexeme: "&&", Pos: pos}
+	case "||":
+		lx.advance(2)
+		return Token{Kind: TokOrOr, Lexeme: "||", Pos: pos}
+	}
+
 	switch r {
 	case '{':
 		lx.advance(s)

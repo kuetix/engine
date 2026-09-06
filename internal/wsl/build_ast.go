@@ -60,7 +60,26 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 			}
 			// state attributes
 			if cs.IfExpr != nil {
-				st.IfExpr = &Expr{Raw: cs.IfExpr.Raw}
+				ie, err := parseValidatedExpr(cs.IfExpr.Raw, fmt.Sprintf("'if' condition in state '%s' of workflow '%s'", st.Name, wf.Name))
+				if err != nil {
+					return nil, err
+				}
+				st.IfExpr = ie
+			}
+			if len(cs.Lets) > 0 {
+				seen := map[string]bool{}
+				for _, cl := range cs.Lets {
+					name := cl.NameTok.Lexeme
+					if seen[name] {
+						return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': 'let %s' is assigned more than once (bindings are single-assignment)", st.Name, wf.Name, name)}
+					}
+					seen[name] = true
+					le, err := parseValidatedExpr(cl.Val.Raw, fmt.Sprintf("'let %s' in state '%s' of workflow '%s'", name, st.Name, wf.Name))
+					if err != nil {
+						return nil, err
+					}
+					st.Lets = append(st.Lets, LetBinding{Name: name, Expr: le})
+				}
 			}
 			st.ContinueOnFail = cs.ContinueOnFail
 			st.SkipTo = cs.SkipTo
@@ -101,7 +120,11 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 				tr := Transition{Name: cs.NameTok.Lexeme, Condition: cond, Target: target, Start: cw.StartName.Lexeme == cs.NameTok.Lexeme}
 				// when expression if present
 				if ct.Cond.WhenExpr != nil {
-					tr.WhenExpr = &Expr{Raw: ct.Cond.WhenExpr.Raw}
+					we, err := parseValidatedExpr(ct.Cond.WhenExpr.Raw, fmt.Sprintf("'when' condition in state '%s' of workflow '%s'", st.Name, wf.Name))
+					if err != nil {
+						return nil, err
+					}
+					tr.WhenExpr = we
 				}
 				// transition call args
 				if len(ct.Args) > 0 {
