@@ -50,6 +50,15 @@ type FlowLet struct {
 	Expr string `json:"expr,omitempty" mapstructure:"expr,omitempty"`
 }
 
+// FlowRetry re-runs a state's action after a failure. Max is the number of
+// retries; Delay is a Go duration string; On (optional) is an expression
+// evaluated after a failed attempt (with `err` bound) — a falsy result stops.
+type FlowRetry struct {
+	Max   int    `json:"max,omitempty" mapstructure:"max,omitempty"`
+	Delay string `json:"delay,omitempty" mapstructure:"delay,omitempty"`
+	On    string `json:"on,omitempty" mapstructure:"on,omitempty"`
+}
+
 type FlowTransition struct {
 	Name            string                 `json:"name"`
 	If              *string                `json:"if,omitempty"`
@@ -61,6 +70,7 @@ type FlowTransition struct {
 	ForEachList     string                 `json:"foreach_list,omitempty" mapstructure:"foreach_list,omitempty"`
 	ForEachParallel bool                   `json:"foreach_parallel,omitempty" mapstructure:"foreach_parallel,omitempty"`
 	ForEachLimit    int                    `json:"foreach_limit,omitempty" mapstructure:"foreach_limit,omitempty"`
+	Retry           *FlowRetry             `json:"retry,omitempty" mapstructure:"retry,omitempty"`
 	SkipTo          *bool                  `json:"skipTo,omitempty"`
 	ParallelCount   int                    `json:"parallel_count,omitempty" mapstructure:"parallel_count,omitempty"`
 	WaitJoin        string                 `json:"wait_join,omitempty" mapstructure:"wait_join,omitempty"`

@@ -3,6 +3,7 @@ package wsl
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // BuildAST converts a CSTModule to an AST Module with semantic validation.
@@ -81,6 +82,13 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 					st.Lets = append(st.Lets, LetBinding{Name: name, Expr: le})
 				}
 			}
+			if cs.Retry != nil {
+				rp, err := buildRetryPolicy(cs.Retry, st.Name, wf.Name)
+				if err != nil {
+					return nil, err
+				}
+				st.Retry = rp
+			}
 			st.ContinueOnFail = cs.ContinueOnFail
 			st.SkipTo = cs.SkipTo
 			if cs.Parallel {
@@ -104,6 +112,9 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 			if cs.ForEach != nil {
 				if cs.Action != nil {
 					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': a 'foreach' state cannot also have a top-level 'action'", st.Name, wf.Name)}
+				}
+				if cs.Retry != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': 'retry' is not supported on a 'foreach' state yet", st.Name, wf.Name)}
 				}
 				le, err := parseValidatedExpr(cs.ForEach.InExpr.Raw, fmt.Sprintf("'foreach' collection in state '%s' of workflow '%s'", st.Name, wf.Name))
 				if err != nil {
@@ -250,6 +261,55 @@ func parallelCount(attrs []CSTConstEntry) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("parallel state requires a 'count' attribute, e.g. parallel[count: 4]")
+}
+
+// buildRetryPolicy validates a `retry[...]` attribute list. `max` is required
+// and >= 1; `delay` (optional) must be a Go duration string; `on` (optional) is
+// a WSL expression.
+func buildRetryPolicy(cr *CSTRetry, stateName, wfName string) (*RetryPolicy, error) {
+	ctx := fmt.Sprintf("retry in state '%s' of workflow '%s'", stateName, wfName)
+	rp := &RetryPolicy{}
+	sawMax := false
+	for _, e := range cr.Attrs {
+		val, err := convertConstValue(e.Val)
+		if err != nil {
+			return nil, &SemanticError{Msg: fmt.Sprintf("%s: bad '%s' value: %v", ctx, e.Key.Lexeme, err)}
+		}
+		switch e.Key.Lexeme {
+		case "max":
+			n, ok := val.(int64)
+			if !ok || n < 1 {
+				return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'max' must be an integer >= 1", ctx)}
+			}
+			rp.Max = int(n)
+			sawMax = true
+		case "delay":
+			s, ok := val.(string)
+			if !ok {
+				return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'delay' must be a duration string, e.g. \"200ms\"", ctx)}
+			}
+			if _, err := time.ParseDuration(s); err != nil {
+				return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'delay' %q is not a valid duration: %v", ctx, s, err)}
+			}
+			rp.Delay = s
+		case "on":
+			s, ok := val.(string)
+			if !ok {
+				return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'on' must be an expression string", ctx)}
+			}
+			ex, err := parseValidatedExpr(s, ctx+": 'on'")
+			if err != nil {
+				return nil, err
+			}
+			rp.On = ex
+		default:
+			return nil, &SemanticError{Msg: fmt.Sprintf("%s: unknown attribute '%s' (allowed: max, delay, on)", ctx, e.Key.Lexeme)}
+		}
+	}
+	if !sawMax {
+		return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'max' is required, e.g. retry[max: 3]", ctx)}
+	}
+	return rp, nil
 }
 
 // bracketAttrInt extracts an optional positive integer attribute by name from a

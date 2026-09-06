@@ -17,8 +17,10 @@ import (
 // concurrent branch execution.
 type parallelTestTransition struct {
 	BaseServiceTransition
-	calls    *int64
-	failFrom int64 // branches with call ordinal > failFrom fail; 0 = never fail
+	calls     *int64
+	failFrom  int64 // branches with call ordinal > failFrom fail; 0 = never fail
+	failUntil int64 // calls with ordinal <= failUntil fail; 0 = disabled
+	failResp  map[string]interface{}
 	// optional concurrency instrumentation
 	inflight *int64
 	peak     *int64
@@ -42,6 +44,9 @@ func (p *parallelTestTransition) Do() domain.FlowStepResult {
 	}
 	if p.failFrom > 0 && n > p.failFrom {
 		return domain.FlowStepResult{Success: false, Error: errors.New("branch failed")}
+	}
+	if p.failUntil > 0 && n <= p.failUntil {
+		return domain.FlowStepResult{Success: false, Error: errors.New("transient failure"), Response: p.failResp}
 	}
 	return domain.FlowStepResult{Success: true, Response: fmt.Sprintf("done-%d", n)}
 }

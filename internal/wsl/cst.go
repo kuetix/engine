@@ -67,6 +67,7 @@ type CSTState struct {
 	IfExpr         *CSTExpr    // if condition expression
 	Lets           []CSTLet    // 'let name = <expr>' bindings, in source order
 	ForEach        *CSTForEach // 'foreach x in <expr> { action ... }' loop body
+	Retry          *CSTRetry   // 'retry[max: N, delay: "..", on: ".."]' policy
 	ContinueOnFail bool        // 'continue on fail' flag
 	SkipTo         bool        // 'skip to' flag
 	// Parallel fork state: parallel[count: N] Name { ... }
@@ -139,6 +140,13 @@ type CSTLet struct {
 	Span    Span
 	NameTok Token
 	Val     *CSTExpr
+}
+
+// CSTRetry is a `retry[max: N, delay: "..", on: ".."]` state attribute.
+type CSTRetry struct {
+	Span  Span
+	Tok   Token
+	Attrs []CSTConstEntry
 }
 
 // CSTForEach is a `foreach <name> in <expr> [parallel[limit: K]] { action ... }`

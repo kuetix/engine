@@ -187,6 +187,16 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 			}
 			tr["lets"] = lets
 		}
+		if n.Retry != nil {
+			retry := map[string]interface{}{"max": n.Retry.Max}
+			if n.Retry.Delay != "" {
+				retry["delay"] = n.Retry.Delay
+			}
+			if n.Retry.On != nil {
+				retry["on"] = n.Retry.On.Raw
+			}
+			tr["retry"] = retry
+		}
 		if n.ForEach != nil {
 			tr["foreach_var"] = n.ForEach.Var
 			tr["foreach_list"] = n.ForEach.List.Raw
@@ -279,6 +289,16 @@ func wslGraphToSchema(g *wsl.Graph) map[string]interface{} {
 			}
 			tr["lets"] = lets
 		}
+		if n.Retry != nil {
+			retry := map[string]interface{}{"max": n.Retry.Max}
+			if n.Retry.Delay != "" {
+				retry["delay"] = n.Retry.Delay
+			}
+			if n.Retry.On != nil {
+				retry["on"] = n.Retry.On.Raw
+			}
+			tr["retry"] = retry
+		}
 		if n.ForEach != nil {
 			tr["foreach_var"] = n.ForEach.Var
 			tr["foreach_list"] = n.ForEach.List.Raw
@@ -364,6 +384,7 @@ var reservedTransitionKeys = map[string]struct{}{
 	"foreach_list":     {},
 	"foreach_parallel": {},
 	"foreach_limit":    {},
+	"retry":            {},
 	"if":               {},
 	"continue_on_fail": {},
 	"skipTo":           {},

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	di "github.com/kuetix/container"
-	"github.com/kuetix/engine/boot"
 	"github.com/kuetix/engine/engine/defines"
 	"github.com/kuetix/engine/engine/domain"
 	"github.com/kuetix/engine/engine/domain/interfaces"
@@ -397,7 +396,7 @@ func (baseWorker *workflowWorker) ProcessState(w EngineInterface, flow *domain.F
 				}
 			}()
 			workerSessionContext.Worker.SetLastResponse(workerSessionContext.Worker.GetWorkerResponse(), workerSessionContext.Worker.GetStatusCode())
-			results, err = CallTransitionByName(callPath, &workerSessionContext, workerTransitions, boot.MetaFunctionCache)
+			results, err = baseWorker.callTransitionWithRetry(callPath, &workerSessionContext, workerTransitions)
 			if err != nil {
 				workerSessionContext.Worker.SetError(&issues.Issue{
 					Message: fmt.Sprintf("Error calling transition %s: %v", callPath, err),

@@ -607,27 +607,54 @@ discuss separately.
 
 ---
 
-### Phase 5 — `retry` and `timeout` as state attributes
+### Phase 5 — `retry` — **DONE** · `timeout` — blocked (ABI)
 
-```
+**`retry` shipped** on `engine-evolution`:
+
+```wsl
 state ChargeCard {
-    retry[max: 3, backoff: exponential, base: 1s, on: <<err.retryable>> == true]
-    timeout: 10s
-    action payments.Charge(...) as charge
-    on success -> Confirm
-    on fail -> Failed
+  retry[max: 3, delay: "200ms", on: "err.retryable == true"]
+  action payments/payments.Charge(amount: total) as charge
+  on success -> Confirm
+  on fail -> Failed
 }
 ```
 
-- `retry` re-runs the **action** (not downstream states); `on:` guard decides
-  whether a given failure is retryable (Phase 1 evaluator over the error alias).
-- `timeout` enforced engine-side via `context.WithTimeout` around the transition
-  call; expiry → `on fail` with a timeout issue.
-- Both are pure engine-side concerns. **Wire protocol unchanged** — but document
-  that transitions should be idempotent under retry (they already should be).
+- Grammar: `retry[max: N, delay: "<dur>", on: "<expr>"]` state attribute (before
+  the action, alongside `if`/`let`). `max` required (`>= 1`, = number of
+  retries); `delay` optional Go duration string; `on` optional expression.
+  `parseOptionalBracketAttrs` now accepts a few keywords (`on`, `error`, `if`,
+  `when`) as attribute keys.
+- Build time: `max` range-checked, `delay` validated with `time.ParseDuration`,
+  `on` parsed via `ParseExpr`. `retry` on a `foreach` state → error (not yet
+  supported).
+- CST `CSTRetry` → AST `State.Retry *RetryPolicy` → IR → schema `retry` →
+  `domain.FlowTransition.Retry *FlowRetry`.
+- Runtime (`engine/workflow/retry.go` `callTransitionWithRetry`, wrapping the
+  action call in `ProcessState`): after a failed attempt (call error, missing
+  `FlowStepResult`, step error, or `Success == false`), if the `on` guard (with
+  `err` bound to `{message, ...map response fields}`) is truthy or absent, sleep
+  `delay` and re-run the action — up to `max` times. The rest of `ProcessState`
+  then processes the final attempt's result unchanged, so success/fail routing,
+  guards, aliases all work.
+- Tests: `internal/wsl/expr_test.go` (`TestRetry_Parse` / `_ParseMinimal`),
+  `engine/workflow/retry_test.go` (succeeds after transient failures with exactly
+  N calls; exhausts → `on fail` with max+1 calls; `on` guard rejects → 1 call;
+  `on` guard allows → retries; full WSL→schema→`CorrectFlow`; build-validation
+  matrix; foreach+retry rejected).
+- **Idempotency obligation:** a transition under a retry policy may be called
+  more than once — must be idempotent. Belongs in the transition-authoring docs.
 
-ABI impact: **none to the protocol**; a **documentation** obligation
-(idempotency) that should be versioned carefully per `CLAUDE.md`.
+**`timeout` — blocked.** Enforcing a timeout means cancelling an in-flight
+transition call. Transitions are `func(command, config, flags)` — **no context
+parameter** — so the engine cannot cancel a running Go transition; a
+goroutine-plus-`select` would abandon (leak) the goroutine on expiry. Doing this
+properly requires adding a context/deadline to the transition signature, which
+is an **ABI change of the highest severity** per `CLAUDE.md` §constraint #2.
+That needs its own design discussion (cooperative deadline via the session
+context is a possible non-breaking middle ground). Not attempted here.
+
+ABI impact of `retry`: **none** (pure engine-side; wire protocol unchanged).
 
 ---
 

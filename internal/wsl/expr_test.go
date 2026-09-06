@@ -327,6 +327,60 @@ workflow bad {
 	}
 }
 
+func TestRetry_Parse(t *testing.T) {
+	src := `
+module m
+workflow m {
+  start: S
+  state S {
+    retry[max: 3, delay: "200ms", on: "err.retryable == true"]
+    action pay/pay.Charge() as ch
+    on success -> Done
+    on fail -> Failed
+  }
+  state Done { end ok }
+  state Failed { end fail }
+}`
+	ast, _, err := ParseAll(src, "m")
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+	rp := ast.Workflows[0].States["S"].Retry
+	if rp == nil {
+		t.Fatal("expected a retry policy")
+	}
+	if rp.Max != 3 || rp.Delay != "200ms" {
+		t.Errorf("retry = %+v", rp)
+	}
+	if rp.On == nil || rp.On.Tree == nil {
+		t.Error("expected the 'on' expression to be parsed")
+	}
+}
+
+func TestRetry_ParseMinimal(t *testing.T) {
+	src := `
+module m
+workflow m {
+  start: S
+  state S {
+    retry[max: 1]
+    action a/a.Do() as r
+    on success -> Done
+    on fail -> Failed
+  }
+  state Done { end ok }
+  state Failed { end fail }
+}`
+	ast, _, err := ParseAll(src, "m")
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+	rp := ast.Workflows[0].States["S"].Retry
+	if rp == nil || rp.Max != 1 || rp.Delay != "" || rp.On != nil {
+		t.Errorf("minimal retry = %+v", rp)
+	}
+}
+
 func TestParseExpr_Shape(t *testing.T) {
 	// precedence: 1 + 2 * 3  =>  (+ 1 (* 2 3))
 	n, err := ParseExpr(`1 + 2 * 3`)

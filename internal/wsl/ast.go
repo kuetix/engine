@@ -47,6 +47,16 @@ type LetBinding struct {
 // <Var>_index bound in scope. Iteration stops on the first failure (the state's
 // `on fail` path is taken); on full success the state's `on success` path is
 // taken and the action alias (if any) is bound to the ordered result slice.
+// RetryPolicy re-runs a state's action after a failure. Max is the number of
+// retries (extra attempts). Delay is a Go duration string ("" = no delay). On,
+// when set, is an expression evaluated after a failed attempt with `err` bound
+// (`{message: "..."}`); a falsy result stops retrying.
+type RetryPolicy struct {
+	Max   int
+	Delay string
+	On    *Expr
+}
+
 type ForEach struct {
 	Var    string
 	List   *Expr
@@ -64,6 +74,7 @@ type State struct {
 	Transitions    []Transition
 	Lets           []LetBinding
 	ForEach        *ForEach
+	Retry          *RetryPolicy
 	Start          bool
 	End            *End
 	IfExpr         *Expr // optional if condition expression
@@ -154,6 +165,7 @@ type Node struct {
 	IfExpr         *Expr             // optional if condition expression
 	Lets           []LetBinding      // let bindings evaluated on state entry
 	ForEach        *ForEach          // optional foreach loop body
+	Retry          *RetryPolicy      // optional retry policy for the action
 	ContinueOnFail bool              // continue on fail flag
 	SkipTo         bool              // skip to flag
 	// Parallel fork/join

@@ -448,6 +448,16 @@ func (p *parser) parseParallelState() (*CSTState, error) {
 	return st, nil
 }
 
+// isKeywordUsableAsAttrKey reports whether a keyword token may also serve as a
+// bracket-attribute key (its lexeme is a common attribute name).
+func isKeywordUsableAsAttrKey(k TokenKind) bool {
+	switch k {
+	case TokOn, TokError, TokIf, TokWhen:
+		return true
+	}
+	return false
+}
+
 // parseOptionalBracketAttrs parses an optional [key: value, ...] attribute
 // list, e.g. the count in `parallel[count: 6]`. Shared between full WSL and
 // SimplifiedWSL so both surfaces accept identical attribute syntax.
@@ -460,9 +470,19 @@ func (p *parser) parseOptionalBracketAttrs() ([]CSTConstEntry, error) {
 		if p.cur.Kind == TokEOF {
 			return nil, errf(p.cur.Pos, "unexpected EOF in bracket attributes, here: ...%s...", p.lx.Peace(20))
 		}
-		key, err := p.expect(TokIdent)
-		if err != nil {
-			return nil, err
+		// Attribute keys are identifiers, but a few (e.g. `on` in a retry
+		// policy) collide with keywords — accept those by their lexeme.
+		var key Token
+		if p.cur.Kind == TokIdent || isKeywordUsableAsAttrKey(p.cur.Kind) {
+			key = p.cur
+			key.Kind = TokIdent
+			p.next()
+		} else {
+			var err error
+			key, err = p.expect(TokIdent)
+			if err != nil {
+				return nil, err
+			}
 		}
 		colon, err := p.expect(TokColon)
 		if err != nil {
@@ -623,6 +643,20 @@ func (p *parser) parseStateAfterKeyword(stTok Token) (*CSTState, error) {
 		} else {
 			return nil, errf(p.cur.Pos, "expected 'to' after 'skip', got %s '%s', here: ...%s...", p.cur.Kind, p.cur.Lexeme, p.lx.Peace(20))
 		}
+	}
+
+	// Optional `retry[max: N, delay: "..", on: ".."]` policy for the action.
+	if p.cur.Kind == TokIdent && p.cur.Lexeme == "retry" {
+		tok := p.cur
+		p.next()
+		if p.cur.Kind != TokLBrack {
+			return nil, errf(p.cur.Pos, "expected '[' after 'retry', e.g. retry[max: 3], here: ...%s...", p.lx.Peace(20))
+		}
+		attrs, err := p.parseOptionalBracketAttrs()
+		if err != nil {
+			return nil, err
+		}
+		st.Retry = &CSTRetry{Span: Span{Start: tok.Pos, End: p.cur.Pos}, Tok: tok, Attrs: attrs}
 	}
 
 	// Optional `foreach <name> in <expr> { action ... }` loop body.

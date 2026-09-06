@@ -34,6 +34,13 @@ func BuildGraph(wf Workflow) *Graph {
 				ParallelLimit: st.ForEach.ParallelLimit,
 			}
 		}
+		if st.Retry != nil {
+			rp := &RetryPolicy{Max: st.Retry.Max, Delay: st.Retry.Delay}
+			if st.Retry.On != nil {
+				rp.On = &Expr{Raw: st.Retry.On.Raw, Tree: st.Retry.On.Tree}
+			}
+			n.Retry = rp
+		}
 		n.ContinueOnFail = st.ContinueOnFail
 		n.SkipTo = st.SkipTo
 		n.Parallel = st.Parallel
