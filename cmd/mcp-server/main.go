@@ -9,6 +9,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -60,10 +61,32 @@ func main() {
 		pidFile           = flag.String("pid-file", "", "Write process PID to this file and remove on exit.")
 		runnerBinFlag     = flag.String("runner-bin", os.Getenv("KUETIX_RUNNER_BIN"), "Path to the kuetix `runner` binary used by wsl_run to execute workflows. Defaults to $KUETIX_RUNNER_BIN.")
 		runScratchDirFlag = flag.String("run-scratch-dir", "runtime/mcp-runs", "Directory wsl_run writes inline/one-off WSL source to before executing it.")
+		showVersion       = flag.Bool("version", false, "Print version / engine build info and exit.")
+		logLevel          = flag.String("log-level", envOr("KUETIX_MCP_LOG_LEVEL", "info"), "Log verbosity: debug|info|warn|error. Also $KUETIX_MCP_LOG_LEVEL.")
+		logFile           = flag.String("log-file", os.Getenv("KUETIX_MCP_LOG_FILE"), "Write logs to this file instead of stderr. Also $KUETIX_MCP_LOG_FILE.")
 	)
 	flag.Parse()
 	runnerBin = *runnerBinFlag
 	runScratchDir = *runScratchDirFlag
+
+	if *showVersion {
+		fmt.Print(collectBuildInfo().String())
+		return
+	}
+
+	logger, closeLog, err := newLogger(*logLevel, *logFile)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "mcp-server: %v\n", err)
+		os.Exit(2)
+	}
+	defer func() { _ = closeLog() }()
+	slog.SetDefault(logger)
+	bi := collectBuildInfo()
+	logger.Info("mcp-server starting",
+		"version", bi.Version, "engine_version", bi.EngineVersion,
+		"build_time", bi.BuildTime, "go", bi.GoVersion,
+		"vcs_revision", bi.VCSRevision, "vcs_modified", bi.VCSModified,
+		"pid", os.Getpid())
 
 	if *pidFile != "" {
 		if err := writePIDFile(*pidFile); err != nil {
@@ -76,9 +99,12 @@ func main() {
 		serverName,
 		serverVersion,
 		server.WithToolCapabilities(true),
+		server.WithRecovery(),
+		server.WithToolHandlerMiddleware(toolLoggingMiddleware(logger)),
 	)
 
 	registerTools(s)
+	logger.Info("tools registered", "count", len(registeredToolNames), "tools", registeredToolNames)
 
 	exit := func(code int) {
 		if *pidFile != "" {
@@ -88,10 +114,13 @@ func main() {
 	}
 
 	if *httpAddr == "" {
+		activeTransport = "stdio"
+		logger.Info("serving", "transport", "stdio")
 		if err := server.ServeStdio(s); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "mcp-server: %v\n", err)
+			logger.Error("stdio transport stopped", "err", err)
 			exit(1)
 		}
+		logger.Info("mcp-server stopped", "transport", "stdio")
 		return
 	}
 
@@ -101,6 +130,7 @@ func main() {
 	)
 	switch *transport {
 	case "sse":
+		activeTransport = "sse"
 		opts := []server.SSEOption{
 			server.WithSSEEndpoint(*ssePath),
 			server.WithMessageEndpoint(*messagePath),
@@ -112,6 +142,7 @@ func main() {
 		srv = server.NewSSEServer(s, opts...)
 		banner = fmt.Sprintf("SSE %s, message %s", *ssePath, *messagePath)
 	case "http", "streamable-http":
+		activeTransport = "http"
 		opts := []server.StreamableHTTPOption{
 			server.WithEndpointPath(*endpointPath),
 			server.WithStateLess(*stateless),
@@ -119,13 +150,13 @@ func main() {
 		srv = server.NewStreamableHTTPServer(s, opts...)
 		banner = fmt.Sprintf("streamable HTTP %s", *endpointPath)
 	default:
-		_, _ = fmt.Fprintf(os.Stderr, "mcp-server: unknown -transport %q (want 'sse' or 'http')\n", *transport)
+		logger.Error("unknown transport", "transport", *transport, "want", "sse|http")
 		exit(2)
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _ = fmt.Fprintf(os.Stderr, "mcp-server: listening on %s (%s)\n", *httpAddr, banner)
+		logger.Info("serving", "transport", activeTransport, "addr", *httpAddr, "endpoint", banner)
 		errCh <- srv.Start(*httpAddr)
 	}()
 
@@ -135,20 +166,29 @@ func main() {
 	select {
 	case err := <-errCh:
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "mcp-server: %v\n", err)
+			logger.Error("transport stopped", "err", err)
 			exit(1)
 		}
-	case <-sigCh:
+	case sig := <-sigCh:
+		logger.Info("signal received, shutting down", "signal", sig.String())
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "mcp-server: shutdown: %v\n", err)
+			logger.Error("shutdown error", "err", err)
 			exit(1)
 		}
 	}
+	logger.Info("mcp-server stopped", "transport", activeTransport)
 	if *pidFile != "" {
 		_ = os.Remove(*pidFile)
 	}
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func writePIDFile(path string) error {
