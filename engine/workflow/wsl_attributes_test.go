@@ -277,8 +277,17 @@ func TestWSLAttributes_Integration(t *testing.T) {
 			t.Error("continue_on_fail should be true")
 		}
 
-		if onSuccessWhen, ok := combinedTransition["on_success_when"].(string); !ok || onSuccessWhen != "$processResult.score > $constants.threshold" {
-			t.Error("on_success_when should be set correctly")
+		// One `on success when` guard plus an unguarded `on success` fallback:
+		// the guard is kept as an ordered guard and the fallback is `true`.
+		guards, ok := combinedTransition["guards"].([]map[string]interface{})
+		if !ok || len(guards) != 1 {
+			t.Fatalf("expected 1 guard, got %v", combinedTransition["guards"])
+		}
+		if guards[0]["when"] != "$processResult.score > $constants.threshold" || guards[0]["to"] != "HighScore" {
+			t.Errorf("guard = %v", guards[0])
+		}
+		if combinedTransition["true"] != "DefaultPath" {
+			t.Errorf("fallback (true) = %v, want DefaultPath", combinedTransition["true"])
 		}
 	})
 
@@ -388,8 +397,8 @@ workflow test {
 			t.Error("IfExpr should be set")
 		}
 
-		if checkNode.IfExpr.Raw != "$enabled = = true" {
-			t.Errorf("Expected if expression '$enabled = = true', got '%s'", checkNode.IfExpr.Raw)
+		if checkNode.IfExpr.Raw != "$enabled == true" {
+			t.Errorf("Expected if expression '$enabled == true', got '%s'", checkNode.IfExpr.Raw)
 		}
 	})
 

@@ -17,6 +17,9 @@ runtime/bin
 # CLI binary
 /kue
 
+# Release / cross-compile output (`make build-all`, goreleaser)
+/dist
+
 # Test binary, built with `go test -c`
 *.test
 

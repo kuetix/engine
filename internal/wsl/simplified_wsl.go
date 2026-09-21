@@ -42,6 +42,7 @@ type SimplifiedCSTModule struct {
 	WorkflowName *Token // optional workflow name
 	Imports      []CSTImport
 	Constants    *CSTConstBlock
+	Lets         []CSTLet // module-level `let name = <expr>` bindings
 	Actions      []SimplifiedCSTAction
 }
 
@@ -151,6 +152,16 @@ func parseSimplifiedCSTWithFilename(src string, filename string) (*SimplifiedCST
 			}
 			cst.Actions = append(cst.Actions, *action)
 		case TokIdent:
+			// `let name = <expr>` — module-level binding, evaluated once on
+			// workflow entry (attached to the start state).
+			if p.cur.Lexeme == "let" {
+				lt, err := p.parseSimplifiedLet()
+				if err != nil {
+					return nil, err
+				}
+				cst.Lets = append(cst.Lets, *lt)
+				continue
+			}
 			// Could be a workflow type keyword or an action
 			// Check if this looks like a workflow type declaration
 			// (identifier at module level before any actions, optionally followed by another identifier)
@@ -202,6 +213,35 @@ func parseSimplifiedCSTWithFilename(src string, filename string) (*SimplifiedCST
 
 	cst.Span.End = p.cur.Pos
 	return cst, nil
+}
+
+// parseSimplifiedLet parses a `let <name> = <expr>` line. The value runs to the
+// end of the source line (SWSL is line-oriented). The raw text is sliced from
+// source so operators the WSL lexer does not tokenise survive.
+func (p *parser) parseSimplifiedLet() (*CSTLet, error) {
+	letStart := p.cur.Pos
+	p.next() // consume 'let'
+	nameTok, err := p.expect(TokIdent)
+	if err != nil {
+		return nil, errf(p.cur.Pos, "expected a name after 'let', here: ...%s...", p.lx.Peace(20))
+	}
+	if _, err := p.expect(TokEqual); err != nil {
+		return nil, errf(p.cur.Pos, "expected '=' after 'let %s', here: ...%s...", nameTok.Lexeme, p.lx.Peace(20))
+	}
+	startOff := p.cur.Pos.Offset
+	line := p.cur.Pos.Line
+	for p.cur.Kind != TokEOF && p.cur.Pos.Line == line {
+		p.next()
+	}
+	endOff := p.cur.Pos.Offset
+	if p.cur.Kind == TokEOF || endOff < startOff || endOff > len(p.lx.src) {
+		endOff = len(p.lx.src)
+	}
+	raw := strings.TrimSpace(p.lx.src[startOff:endOff])
+	if raw == "" {
+		return nil, errf(p.cur.Pos, "empty 'let' value, expected an expression, here: ...%s...", p.lx.Peace(20))
+	}
+	return &CSTLet{Span: Span{Start: letStart, End: p.cur.Pos}, NameTok: nameTok, Val: &CSTExpr{Raw: raw, Span: Span{Start: letStart, End: p.cur.Pos}}}, nil
 }
 
 // parseSimplifiedAction parses an action with optional error bindings and flows
@@ -440,7 +480,30 @@ func buildSimplifiedAST(cst *SimplifiedCSTModule) (*Module, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Module-level `let` bindings attach to the start state, so they are
+		// evaluated once when the workflow begins.
+		if len(cst.Lets) > 0 {
+			start := workflow.States[workflow.Start]
+			if start == nil {
+				return nil, &SemanticError{Msg: "simplified WSL: 'let' bindings require at least one action"}
+			}
+			seen := map[string]bool{}
+			for _, cl := range cst.Lets {
+				name := cl.NameTok.Lexeme
+				if seen[name] {
+					return nil, &SemanticError{Msg: fmt.Sprintf("simplified WSL: 'let %s' is assigned more than once (bindings are single-assignment)", name)}
+				}
+				seen[name] = true
+				le, err := parseValidatedExpr(cl.Val.Raw, fmt.Sprintf("'let %s' in module '%s'", name, cst.NameTok.Lexeme))
+				if err != nil {
+					return nil, err
+				}
+				start.Lets = append(start.Lets, LetBinding{Name: name, Expr: le})
+			}
+		}
 		mod.Workflows = append(mod.Workflows, *workflow)
+	} else if len(cst.Lets) > 0 {
+		return nil, &SemanticError{Msg: "simplified WSL: 'let' bindings require at least one action"}
 	}
 
 	return mod, nil

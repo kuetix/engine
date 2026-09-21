@@ -63,10 +63,14 @@ type CSTState struct {
 	RParen *Token
 	LBrace Token
 	// Optional state attributes
-	IfTok          *Token   // 'if' keyword
-	IfExpr         *CSTExpr // if condition expression
-	ContinueOnFail bool     // 'continue on fail' flag
-	SkipTo         bool     // 'skip to' flag
+	IfTok          *Token      // 'if' keyword
+	IfExpr         *CSTExpr    // if condition expression
+	Lets           []CSTLet    // 'let name = <expr>' bindings, in source order
+	ForEach        *CSTForEach // 'foreach x in <expr> { action ... }' loop body
+	While          *CSTWhile   // 'while[max: N] <expr> { action ... }' loop body
+	Retry          *CSTRetry   // 'retry[max: N, delay: "..", on: ".."]' policy
+	ContinueOnFail bool        // 'continue on fail' flag
+	SkipTo         bool        // 'skip to' flag
 	// Parallel fork state: parallel[count: N] Name { ... }
 	Parallel      bool
 	ParallelAttrs []CSTConstEntry // attributes from the [ ... ] list (count, ...)
@@ -130,6 +134,44 @@ type CSTExpr struct {
 	// For MVP we keep raw string of expression text and span
 	Raw  string
 	Span Span
+}
+
+// CSTLet is a `let <name> = <expr>` binding in a state body.
+type CSTLet struct {
+	Span    Span
+	NameTok Token
+	Val     *CSTExpr
+}
+
+// CSTWhile is a `while[max: N] <expr> { action ... }` loop body.
+type CSTWhile struct {
+	Span     Span
+	Tok      Token
+	Attrs    []CSTConstEntry // bracket attrs after `while` (max, required)
+	CondExpr *CSTExpr
+	LBrace   Token
+	Action   *CSTAction
+	RBrace   Token
+}
+
+// CSTRetry is a `retry[max: N, delay: "..", on: ".."]` state attribute.
+type CSTRetry struct {
+	Span  Span
+	Tok   Token
+	Attrs []CSTConstEntry
+}
+
+// CSTForEach is a `foreach <name> in <expr> [parallel[limit: K]] { action ... }`
+// loop body.
+type CSTForEach struct {
+	Span          Span
+	VarTok        Token
+	InExpr        *CSTExpr
+	ParallelTok   *Token          // present when `parallel[...]` is given
+	ParallelAttrs []CSTConstEntry // bracket attrs after `parallel` (limit)
+	LBrace        Token
+	Action        *CSTAction
+	RBrace        Token
 }
 
 type CSTConstBlock struct {

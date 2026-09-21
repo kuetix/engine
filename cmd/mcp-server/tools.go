@@ -5,8 +5,18 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// add registers one tool and records its name for server_info.
+func add(s *server.MCPServer, tool mcp.Tool, h server.ToolHandlerFunc) {
+	registeredToolNames = append(registeredToolNames, tool.Name)
+	s.AddTool(tool, h)
+}
+
 func registerTools(s *server.MCPServer) {
-	s.AddTool(mcp.NewTool("wsl_parse",
+	add(s, mcp.NewTool("server_info",
+		mcp.WithDescription("Report this MCP server's build: version, engine module version, build time, Go version, VCS revision, active transport, uptime, and the list of tools it exposes. Call this to confirm which engine build (and therefore which WSL grammar) you are talking to."),
+	), handleServerInfo)
+
+	add(s, mcp.NewTool("wsl_parse",
 		mcp.WithDescription("Parse a WSL or SWSL workflow and return a structured summary (module, imports, constants, workflows, states). Provide either `source` (raw text) or `path` (file path). Format is auto-detected from extension or the `simplified` flag."),
 		mcp.WithString("source", mcp.Description("Raw WSL/SWSL source text")),
 		mcp.WithString("path", mcp.Description("Path to a .wsl or .swsl file (relative to working directory or absolute)")),
@@ -14,7 +24,7 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithBoolean("simplified", mcp.Description("Force SWSL parser. If omitted, the format is inferred from the file extension")),
 	), handleParse)
 
-	s.AddTool(mcp.NewTool("wsl_validate",
+	add(s, mcp.NewTool("wsl_validate",
 		mcp.WithDescription("Validate a WSL/SWSL workflow. Returns ok=true on success or a list of diagnostics. Same input contract as wsl_parse."),
 		mcp.WithString("source", mcp.Description("Raw WSL/SWSL source text")),
 		mcp.WithString("path", mcp.Description("Path to a .wsl or .swsl file")),
@@ -22,12 +32,12 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithBoolean("simplified", mcp.Description("Force SWSL parser")),
 	), handleValidate)
 
-	s.AddTool(mcp.NewTool("wsl_list_workflows",
+	add(s, mcp.NewTool("wsl_list_workflows",
 		mcp.WithDescription("Recursively list .wsl and .swsl files under a directory. Defaults to runtime/workflows."),
 		mcp.WithString("dir", mcp.Description("Directory to scan (default: runtime/workflows)")),
 	), handleListWorkflows)
 
-	s.AddTool(mcp.NewTool("wsl_explain",
+	add(s, mcp.NewTool("wsl_explain",
 		mcp.WithDescription("Return a detailed structured explanation of a WSL/SWSL workflow: every state with its action, transitions (including when-conditions), parameters, terminal kind, and flags. Same input contract as wsl_parse."),
 		mcp.WithString("source", mcp.Description("Raw WSL/SWSL source text")),
 		mcp.WithString("path", mcp.Description("Path to a .wsl or .swsl file")),
@@ -35,7 +45,7 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithBoolean("simplified", mcp.Description("Force SWSL parser")),
 	), handleExplain)
 
-	s.AddTool(mcp.NewTool("wsl_workflow_actions",
+	add(s, mcp.NewTool("wsl_workflow_actions",
 		mcp.WithDescription("Parse a WSL/SWSL workflow via the standard engine pipeline (AST + IR graphs) and return every service action it references with its module, method name, named argument names, raw arg text, state, params, and terminal kind. Also returns a deduplicated `catalog` keyed by `module.name` with the WSL import path, unique argNames, and sample args — exactly what's needed to reference the same actions from a newly generated WSL file. Accepts EITHER an on-disk file via `path` OR raw in-memory WSL/SWSL via `source` (no file required). When `source` is given, the WSL/SWSL format is auto-inferred from a `.wsl`/`.swsl` filename hint or by sniffing the source; override with `simplified`."),
 		mcp.WithString("source", mcp.Description("Raw WSL/SWSL source text. Use this when the workflow is not (or not yet) on disk — e.g. generated in-memory or sent from a client. Either `source` or `path` must be provided.")),
 		mcp.WithString("path", mcp.Description("Path to a .wsl or .swsl file on disk. Either `source` or `path` must be provided.")),
@@ -43,15 +53,15 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithBoolean("simplified", mcp.Description("Force SWSL parser. Omit to auto-detect from file/filename extension or source sniffing.")),
 	), handleWorkflowActions)
 
-	s.AddTool(mcp.NewTool("wsl_syntax_reference",
+	add(s, mcp.NewTool("wsl_syntax_reference",
 		mcp.WithDescription("Return the WSL syntax cheat sheet (grammar overview, transitions, when-expressions, variable refs, action arguments, orchestration). Use this to ground workflow generation."),
 	), handleSyntaxReference)
 
-	s.AddTool(mcp.NewTool("transition_reference",
+	add(s, mcp.NewTool("transition_reference",
 		mcp.WithDescription("Return the kuetix Transition standards cheat sheet: folder layout, package/struct/constructor rules, FlowStepResult success/error contract, supported parameter types. Use this to ground Go transition generation."),
 	), handleTransitionReference)
 
-	s.AddTool(mcp.NewTool("transition_scaffold",
+	add(s, mcp.NewTool("transition_scaffold",
 		mcp.WithDescription("Create a new kuetix transition module. Generates modules/<service>/<namespace>/transitions/<namespace>.go with the canonical package, struct, constructor, and optional method stubs. Each stub returns domain.FlowStepResult with Success=true, StatusCode=200, Response=map[string]interface{}{}. After running, call `kue update` to regenerate modules/di.go and modules/meta.go."),
 		mcp.WithString("service", mcp.Description("Top-level service directory (e.g. 'billing'). Required."), mcp.Required()),
 		mcp.WithString("namespace", mcp.Description("Namespace under service; also becomes the struct/file name (e.g. 'payment'). Required."), mcp.Required()),
@@ -60,7 +70,7 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithBoolean("overwrite", mcp.Description("Overwrite an existing transition file. Default false.")),
 	), handleTransitionScaffold)
 
-	s.AddTool(mcp.NewTool("transition_add_method",
+	add(s, mcp.NewTool("transition_add_method",
 		mcp.WithDescription("Append a new method to an existing kuetix transition file. The method follows the standard contract: named return `(r domain.FlowStepResult)`, success path sets r.Success=true / StatusCode=200 / Response=map[string]interface{}{}. Fails if the method name already exists. Go-formats the result."),
 		mcp.WithString("path", mcp.Description("Path to the transition .go file (e.g. modules/billing/payment/transitions/payment.go). Required."), mcp.Required()),
 		mcp.WithString("method_name", mcp.Description("Exported PascalCase method name (must match the WSL action method name). Required."), mcp.Required()),
@@ -68,7 +78,7 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithString("description", mcp.Description("Optional doc comment for the method.")),
 	), handleTransitionAddMethod)
 
-	s.AddTool(mcp.NewTool("wsl_run",
+	add(s, mcp.NewTool("wsl_run",
 		mcp.WithDescription("Execute a WSL/SWSL workflow (generated in-memory or read from disk — same `source`/`path` contract as wsl_parse) using the kuetix `runner` sandbox (std-core + std-http + std-ai actions only; project-specific transitions are not available — check with wsl_workflow_actions first). Returns the execution result and, unless `record_history` is false, records a self-documenting history entry (full source + args + result) via the kuetix API that `wsl_history_get` can fetch later. Requires the server to be started with -runner-bin/$KUETIX_RUNNER_BIN, and (for history) a prior `kue login`."),
 		mcp.WithString("source", mcp.Description("Raw WSL/SWSL source text")),
 		mcp.WithString("path", mcp.Description("Path to a .wsl or .swsl file")),
@@ -78,18 +88,18 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithBoolean("record_history", mcp.Description("Record this run to WSL history via the kuetix API. Default true.")),
 	), handleRun)
 
-	s.AddTool(mcp.NewTool("wsl_history_list",
+	add(s, mcp.NewTool("wsl_history_list",
 		mcp.WithDescription("List past WSL/SWSL runs recorded by wsl_run, newest first (summaries only — call wsl_history_get for the full self-documenting record). Requires a prior `kue login`."),
 		mcp.WithNumber("limit", mcp.Description("Max entries to return (default 10, max 200).")),
 		mcp.WithString("cursor", mcp.Description("Pagination cursor from a previous call's response.")),
 	), handleHistoryList)
 
-	s.AddTool(mcp.NewTool("wsl_history_get",
+	add(s, mcp.NewTool("wsl_history_get",
 		mcp.WithDescription("Fetch one WSL run record by id — the full self-documenting entry (original WSL/SWSL source, args, and result) with no other context needed to understand what ran. Requires a prior `kue login`."),
 		mcp.WithString("id", mcp.Description("Run id, as returned by wsl_run or wsl_history_list."), mcp.Required()),
 	), handleHistoryGet)
 
-	s.AddTool(mcp.NewTool("transition_validate",
+	add(s, mcp.NewTool("transition_validate",
 		mcp.WithDescription("Validate kuetix transition Go files against the standards: package=transitions, struct name `<namespace>Transitions` embedding workflow.BaseServiceTransition, constructor `New<Namespace>Transitions` returning interfaces.ServiceTransitions, exported methods with named return `(r domain.FlowStepResult)`, and the success contract (sets r.Success, r.StatusCode, r.Response or r.Error). Provide `path` for a single file or `dir` to walk recursively (defaults to 'modules'). Returns per-file diagnostics with severity and line numbers."),
 		mcp.WithString("path", mcp.Description("Path to a single transition .go file to validate.")),
 		mcp.WithString("dir", mcp.Description("Directory to walk (default: 'modules'). Only files under a 'transitions/' folder are checked.")),

@@ -3,6 +3,7 @@ package wsl
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // BuildAST converts a CSTModule to an AST Module with semantic validation.
@@ -60,7 +61,33 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 			}
 			// state attributes
 			if cs.IfExpr != nil {
-				st.IfExpr = &Expr{Raw: cs.IfExpr.Raw}
+				ie, err := parseValidatedExpr(cs.IfExpr.Raw, fmt.Sprintf("'if' condition in state '%s' of workflow '%s'", st.Name, wf.Name))
+				if err != nil {
+					return nil, err
+				}
+				st.IfExpr = ie
+			}
+			if len(cs.Lets) > 0 {
+				seen := map[string]bool{}
+				for _, cl := range cs.Lets {
+					name := cl.NameTok.Lexeme
+					if seen[name] {
+						return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': 'let %s' is assigned more than once (bindings are single-assignment)", st.Name, wf.Name, name)}
+					}
+					seen[name] = true
+					le, err := parseValidatedExpr(cl.Val.Raw, fmt.Sprintf("'let %s' in state '%s' of workflow '%s'", name, st.Name, wf.Name))
+					if err != nil {
+						return nil, err
+					}
+					st.Lets = append(st.Lets, LetBinding{Name: name, Expr: le})
+				}
+			}
+			if cs.Retry != nil {
+				rp, err := buildRetryPolicy(cs.Retry, st.Name, wf.Name)
+				if err != nil {
+					return nil, err
+				}
+				st.Retry = rp
 			}
 			st.ContinueOnFail = cs.ContinueOnFail
 			st.SkipTo = cs.SkipTo
@@ -82,6 +109,55 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 			if cs.Action != nil {
 				st.Action = toAction(cs.Action)
 			}
+			if cs.ForEach != nil {
+				if cs.Action != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': a 'foreach' state cannot also have a top-level 'action'", st.Name, wf.Name)}
+				}
+				if cs.Retry != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': 'retry' is not supported on a 'foreach' state yet", st.Name, wf.Name)}
+				}
+				le, err := parseValidatedExpr(cs.ForEach.InExpr.Raw, fmt.Sprintf("'foreach' collection in state '%s' of workflow '%s'", st.Name, wf.Name))
+				if err != nil {
+					return nil, err
+				}
+				body := toAction(cs.ForEach.Action)
+				fe := &ForEach{Var: cs.ForEach.VarTok.Lexeme, List: le, Action: body}
+				if cs.ForEach.ParallelTok != nil {
+					fe.Parallel = true
+					limit, err := bracketAttrInt(cs.ForEach.ParallelAttrs, "limit")
+					if err != nil {
+						return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': foreach %v", st.Name, wf.Name, err)}
+					}
+					fe.ParallelLimit = limit
+				}
+				st.ForEach = fe
+				// The body action is also the state's action so the existing
+				// arg-injection / alias / resolver handling applies unchanged.
+				st.Action = body
+			}
+			if cs.While != nil {
+				if cs.Action != nil || cs.ForEach != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': 'while' cannot be combined with a top-level 'action' or 'foreach'", st.Name, wf.Name)}
+				}
+				if cs.Retry != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("state '%s' in workflow '%s': 'retry' is not supported on a 'while' state yet", st.Name, wf.Name)}
+				}
+				ctx := fmt.Sprintf("'while' in state '%s' of workflow '%s'", st.Name, wf.Name)
+				max, err := bracketAttrInt(cs.While.Attrs, "max")
+				if err != nil {
+					return nil, &SemanticError{Msg: fmt.Sprintf("%s: %v", ctx, err)}
+				}
+				if max < 1 {
+					return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'max' is required and must be >= 1, e.g. while[max: 500]", ctx)}
+				}
+				ce, err := parseValidatedExpr(cs.While.CondExpr.Raw, ctx+" condition")
+				if err != nil {
+					return nil, err
+				}
+				body := toAction(cs.While.Action)
+				st.While = &WhileLoop{Max: max, Cond: ce, Action: body}
+				st.Action = body
+			}
 			for _, ct := range cs.Transitions {
 				cond := toCondition(ct.Cond)
 				target := ct.TargetTok.Lexeme
@@ -101,7 +177,11 @@ func BuildAST(cst *CSTModule) (*Module, error) {
 				tr := Transition{Name: cs.NameTok.Lexeme, Condition: cond, Target: target, Start: cw.StartName.Lexeme == cs.NameTok.Lexeme}
 				// when expression if present
 				if ct.Cond.WhenExpr != nil {
-					tr.WhenExpr = &Expr{Raw: ct.Cond.WhenExpr.Raw}
+					we, err := parseValidatedExpr(ct.Cond.WhenExpr.Raw, fmt.Sprintf("'when' condition in state '%s' of workflow '%s'", st.Name, wf.Name))
+					if err != nil {
+						return nil, err
+					}
+					tr.WhenExpr = we
 				}
 				// transition call args
 				if len(ct.Args) > 0 {
@@ -204,6 +284,79 @@ func parallelCount(attrs []CSTConstEntry) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("parallel state requires a 'count' attribute, e.g. parallel[count: 4]")
+}
+
+// buildRetryPolicy validates a `retry[...]` attribute list. `max` is required
+// and >= 1; `delay` (optional) must be a Go duration string; `on` (optional) is
+// a WSL expression.
+func buildRetryPolicy(cr *CSTRetry, stateName, wfName string) (*RetryPolicy, error) {
+	ctx := fmt.Sprintf("retry in state '%s' of workflow '%s'", stateName, wfName)
+	rp := &RetryPolicy{}
+	sawMax := false
+	for _, e := range cr.Attrs {
+		val, err := convertConstValue(e.Val)
+		if err != nil {
+			return nil, &SemanticError{Msg: fmt.Sprintf("%s: bad '%s' value: %v", ctx, e.Key.Lexeme, err)}
+		}
+		switch e.Key.Lexeme {
+		case "max":
+			n, ok := val.(int64)
+			if !ok || n < 1 {
+				return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'max' must be an integer >= 1", ctx)}
+			}
+			rp.Max = int(n)
+			sawMax = true
+		case "delay":
+			s, ok := val.(string)
+			if !ok {
+				return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'delay' must be a duration string, e.g. \"200ms\"", ctx)}
+			}
+			if _, err := time.ParseDuration(s); err != nil {
+				return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'delay' %q is not a valid duration: %v", ctx, s, err)}
+			}
+			rp.Delay = s
+		case "on":
+			s, ok := val.(string)
+			if !ok {
+				return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'on' must be an expression string", ctx)}
+			}
+			ex, err := parseValidatedExpr(s, ctx+": 'on'")
+			if err != nil {
+				return nil, err
+			}
+			rp.On = ex
+		default:
+			return nil, &SemanticError{Msg: fmt.Sprintf("%s: unknown attribute '%s' (allowed: max, delay, on)", ctx, e.Key.Lexeme)}
+		}
+	}
+	if !sawMax {
+		return nil, &SemanticError{Msg: fmt.Sprintf("%s: 'max' is required, e.g. retry[max: 3]", ctx)}
+	}
+	return rp, nil
+}
+
+// bracketAttrInt extracts an optional positive integer attribute by name from a
+// bracket attribute list (e.g. the `limit` in `foreach x in xs parallel[limit: 4]`).
+// Returns 0 when the attribute is absent.
+func bracketAttrInt(attrs []CSTConstEntry, name string) (int, error) {
+	for _, e := range attrs {
+		if e.Key.Lexeme != name {
+			continue
+		}
+		val, err := convertConstValue(e.Val)
+		if err != nil {
+			return 0, fmt.Errorf("invalid '%s' value: %v", name, err)
+		}
+		v, ok := val.(int64)
+		if !ok {
+			return 0, fmt.Errorf("'%s' must be an integer, got %T", name, val)
+		}
+		if v < 1 {
+			return 0, fmt.Errorf("'%s' must be >= 1, got %d", name, v)
+		}
+		return int(v), nil
+	}
+	return 0, nil
 }
 
 func toAction(ca *CSTAction) *Action {
