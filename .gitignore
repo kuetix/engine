@@ -12,6 +12,7 @@ runtime/bin
 # Top-level binary artifacts (built by `make build` / `make build_linux_arm`)
 /mcp-server
 /mcp-server_arm64
+/deploy.sh
 
 # CLI binary
 /kue
